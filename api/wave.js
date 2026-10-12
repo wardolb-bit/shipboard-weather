@@ -31,6 +31,6 @@ module.exports=async function(req,res){
  }
  if(points.length<10)throw Error('NOAA returned insufficient marine wave grid points');
  res.setHeader('Cache-Control','s-maxage=1200, stale-while-revalidate=600');
- return res.status(200).json({points,step:1,validTime:date+' '+cycle+':00 UTC (GFS Wave f'+String(forecastHour).padStart(3,'0')+')',source:'NOAA NOMADS GFS Wave',modelRun:date+'T'+cycle+':00Z',forecastHour});
+ return res.status(200).json({points,step:1,validTime:new Date(Date.UTC(Number(date.slice(0,4)),Number(date.slice(4,6))-1,Number(date.slice(6,8)),Number(cycle)+forecastHour)).toISOString()+' (GFS Wave f'+String(forecastHour).padStart(3,'0')+')',source:'NOAA NOMADS GFS Wave',modelRun:date+'T'+cycle+':00Z',forecastHour});
  }catch(e){console.error('NOAA GFS Wave ingest:',e.message,e.cause?.message||'');return res.status(503).json({error:'NOAA GFS Wave unavailable: '+String(e.message).slice(0,130)})}
 };
