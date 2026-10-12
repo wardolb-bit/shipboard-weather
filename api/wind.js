@@ -54,7 +54,7 @@ module.exports=async function(req,res){
    const a=nearestGridpoint(u.geometry,y,x),b=nearestGridpoint(v.geometry,y,x);
    const eastward=Number(u.values[a.index]),northward=Number(v.values[b.index]);
    if(Number.isFinite(eastward)&&Number.isFinite(northward)&&Math.abs(eastward)<160&&Math.abs(northward)<160)
-    points.push({lat:y,lon:x>180?x-360:x,u:eastward,v:northward,...(gust?{gust:Number(gust.values[nearestGridpoint(gust.geometry,y,x).index])}:{})});
+    points.push({lat:y,lon:x-360*Math.round((x-lon)/360),u:eastward,v:northward,...(gust?{gust:Number(gust.values[nearestGridpoint(gust.geometry,y,x).index])}:{})});
   }
   if(points.length<50)throw Error('Incomplete NOAA model subset');
   const uSample=nearestGridpoint(u.geometry,lat,central),vSample=nearestGridpoint(v.geometry,lat,central);
