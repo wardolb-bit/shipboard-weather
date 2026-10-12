@@ -18,5 +18,5 @@ module.exports=async function(req,res){
   if(points.length<6)throw Error('NOAA returned insufficient wind samples');
   res.setHeader('Cache-Control','s-maxage=900, stale-while-revalidate=600');
   return res.status(200).json({points,validTime:rows[0][ix[4]],step:2});
- }catch(error){return res.status(503).json({error:'NOAA wind temporarily unavailable: '+String(error.message).slice(0,120)})}
+ }catch(error){console.error('NOAA wind upstream failure',String(error.message));return res.status(503).json({error:'NOAA wind temporarily unavailable: '+String(error.message).slice(0,180)})}
 }
