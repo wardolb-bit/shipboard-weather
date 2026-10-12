@@ -44,6 +44,6 @@ module.exports=async function(req,res){
   }
   if(points.length<50)throw Error('Incomplete NOAA model subset');
   res.setHeader('Cache-Control','s-maxage=1200, stale-while-revalidate=600');
-  res.status(200).json({points,step:1,validTime:date+' '+cycle+':00 UTC (GFS f'+String(forecastHour).padStart(3,'0')+')',modelRun:date+'T'+cycle+':00Z',forecastHour,source:'NOAA NOMADS GFS 0.25° GRIB2',coverage:{north,south,west,east}});
+  res.status(200).json({points,step:1,validTime:new Date(Date.UTC(Number(date.slice(0,4)),Number(date.slice(4,6))-1,Number(date.slice(6,8)),Number(cycle)+forecastHour)).toISOString()+' (GFS f'+String(forecastHour).padStart(3,'0')+')',modelRun:date+'T'+cycle+':00Z',forecastHour,source:'NOAA NOMADS GFS 0.25° GRIB2',coverage:{north,south,west,east}});
  }catch(e){const cause=e.cause?.message||e.cause?.code||'';console.error('NOMADS GFS ingest error:',e.message,cause);res.status(503).json({error:'NOAA NOMADS GFS GRIB2 ingest unavailable: '+String(e.message).slice(0,140)})}
 };
