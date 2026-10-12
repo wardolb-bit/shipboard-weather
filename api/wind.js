@@ -8,7 +8,7 @@ module.exports=async function(req,res){
    return res.status(400).json({error:'Invalid geographical position'});
   const {splitMessages,parseFields,parseProduct,parseGrid,decodeFieldValues,nearestGridpoint}=await import('@azohra/meteo.grib');
   // Forecast +0 is current UTC hour, following NavDash's valid-time convention.
-  const target=new Date();target.setUTCMinutes(0,0,0);target.setUTCHours(target.getUTCHours()+forecastHour);
+  const requested=String(req.query.validAt||'');const target=requested?new Date(requested):new Date();if(!Number.isFinite(target.getTime()))return res.status(400).json({error:'Invalid forecast UTC time'});target.setUTCMinutes(0,0,0);if(!requested)target.setUTCHours(target.getUTCHours()+forecastHour);
   const anchor=new Date();anchor.setUTCMinutes(0,0,0);anchor.setUTCHours(Math.floor(anchor.getUTCHours()/6)*6);
   let run=null,modelForecastHour=null;
   for(let i=0;i<8;i++){
