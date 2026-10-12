@@ -15,7 +15,7 @@ module.exports=async function(req,res){
   const central=(lon+360)%360;
   if(central<12||central>348)return res.status(422).json({error:'This initial NOMADS subset does not yet support crossing 0°E longitude. No alternative model substituted.'});
   const west=Math.floor(central-11),east=Math.ceil(central+11);
-  const params=new URLSearchParams({file:'gfs.t'+cycle+'z.pgrb2.0p25.f000',var_UGRD:'on',var_VGRD:'on',lev_10_m_above_ground:'on',subregion:'',leftlon:String(west),rightlon:String(east),toplat:String(north),bottomlat:String(south),dir:'/gfs.'+date+'/'+cycle+'/atmos'});
+  const params=new URLSearchParams({file:'gfs.t'+cycle+'z.pgrb2.0p25.f000',var_UGRD:'on',var_VGRD:'on',var_GUST:'on',lev_surface:'on',lev_10_m_above_ground:'on',subregion:'',leftlon:String(west),rightlon:String(east),toplat:String(north),bottomlat:String(south),dir:'/gfs.'+date+'/'+cycle+'/atmos'});
   const url='https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl?'+params;
   const ctrl=new AbortController(),timeout=setTimeout(()=>ctrl.abort(),22000);let response;
   try{response=await fetch(url,{signal:ctrl.signal,headers:{Accept:'application/octet-stream'}})}finally{clearTimeout(timeout)}
@@ -27,20 +27,20 @@ module.exports=async function(req,res){
   for(const message of splitMessages(bytes)){
    for(const field of parseFields(message)){
     const product=parseProduct(field.section4);
-    if(product.parameterCategory!==2||![2,3].includes(product.parameterNumber))continue;
+    if(product.parameterCategory!==2||![2,3,22].includes(product.parameterNumber))continue;
     const geometry=parseGrid(field.section3);
     const {values}=decodeFieldValues(field);
-    decoded.push({component:product.parameterNumber===2?'u':'v',values,geometry});
+    decoded.push({component:product.parameterNumber===2?'u':product.parameterNumber===3?'v':'gust',values,geometry});
    }
   }
-  const u=decoded.find(x=>x.component==='u'),v=decoded.find(x=>x.component==='v');
+  const u=decoded.find(x=>x.component==='u'),v=decoded.find(x=>x.component==='v'),gust=decoded.find(x=>x.component==='gust');
   if(!u||!v)throw Error('GRIB2 did not contain paired 10m U/V wind fields');
   const points=[];
   for(let y=south;y<=north;y+=1)for(let x=west;x<=east;x+=1){
    const a=nearestGridpoint(u.geometry,y,x),b=nearestGridpoint(v.geometry,y,x);
    const eastward=Number(u.values[a.index]),northward=Number(v.values[b.index]);
    if(Number.isFinite(eastward)&&Number.isFinite(northward)&&Math.abs(eastward)<160&&Math.abs(northward)<160)
-    points.push({lat:y,lon:x>180?x-360:x,u:eastward,v:northward});
+    points.push({lat:y,lon:x>180?x-360:x,u:eastward,v:northward,...(gust?{gust:Number(gust.values[nearestGridpoint(gust.geometry,y,x).index])}:{})});
   }
   if(points.length<50)throw Error('Incomplete NOAA model subset');
   res.setHeader('Cache-Control','s-maxage=1200, stale-while-revalidate=600');
