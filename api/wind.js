@@ -1,39 +1,49 @@
-// NOAA GFS 10 m wind vector endpoint. Keeps model retrieval separate from map rendering.
+// Official NOAA NOMADS GFS 0.25° GRIB2 ingest: 10m U and V wind.
+// A failed or unavailable model file must never be replaced by fabricated weather.
 module.exports=async function(req,res){
+ const errors=[];
  try{
   const lat=Number(req.query.lat),lon=Number(req.query.lon);
-  if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>85||Math.abs(lon)>180)return res.status(400).json({error:'Invalid position'});
-  const north=Math.min(89.5,Math.round((lat+19)*2)/2),south=Math.max(-89.5,Math.round((lat-19)*2)/2);
-  const mid=(lon+360)%360,west=Math.max(0,Math.round((mid-24)*2)/2),east=Math.min(359.5,Math.round((mid+24)*2)/2);
-  if(west>=east)return res.status(422).json({error:'Area crosses NOAA longitude seam; select a nearby area'});
-  const slice='[(last)][('+north+'):4:('+south+')][('+west+'):4:('+east+')]';
-  // NOAA CoastWatch may be unavailable even while cached forecast data remains valid.
-  // Fall back to NOAA Upwell's mirrored GFS dataset without fabricating a field.
-  const query=encodeURIComponent('ugrd10m'+slice+',vgrd10m'+slice);
-  const sources=[
-   {name:'NOAA CoastWatch',url:'https://coastwatch.pfeg.noaa.gov/erddap/griddap/NCEP_Global_Best.json?'+query},
-   {name:'NOAA Upwell',url:'https://upwell.pfeg.noaa.gov/erddap/griddap/ncep_global.json?'+query}
-  ];
-  let response,sourceName,errors=[];
-  for(const source of sources){
-   const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),10000);
-   try{
-    const candidate=await fetch(source.url,{signal:controller.signal,headers:{Accept:'application/json'}});
-    if(!candidate.ok)throw Error('HTTP '+candidate.status);
-    response=candidate;sourceName=source.name;break;
-   }catch(err){
-    const reason=err.cause?.code||err.cause?.message||err.message;
-    console.error('GFS source failed',source.name,String(reason).slice(0,140));
-    errors.push(source.name+': '+String(reason).slice(0,90));
-   }finally{clearTimeout(timeout)}
+  if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>84||Math.abs(lon)>180)
+   return res.status(400).json({error:'Invalid geographical position'});
+  const {splitMessages,parseFields,parseProduct,parseGrid,decodeFieldValues,nearestGridpoint}=await import('@azohra/meteo.grib');
+  const now=new Date(),asOf=new Date(now.getTime()-8*3600000);
+  const date=asOf.toISOString().slice(0,10).replaceAll('-','');
+  const cycle=String(Math.floor(asOf.getUTCHours()/6)*6).padStart(2,'0');
+  const north=Math.min(89,Math.ceil(lat+11)),south=Math.max(-89,Math.floor(lat-11));
+  // Work in the 0..360 longitude domain; do not let a subset silently cross its seam.
+  const central=(lon+360)%360;
+  if(central<12||central>348)return res.status(422).json({error:'This initial NOMADS subset does not yet support crossing 0°E longitude. No alternative model substituted.'});
+  const west=Math.floor(central-11),east=Math.ceil(central+11);
+  const params=new URLSearchParams({file:'gfs.t'+cycle+'z.pgrb2.0p25.f000',var_UGRD:'on',var_VGRD:'on',lev_10_m_above_ground:'on',subregion:'',leftlon:String(west),rightlon:String(east),toplat:String(north),bottomlat:String(south),dir:'/gfs.'+date+'/'+cycle+'/atmos'});
+  const url='https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl?'+params;
+  const ctrl=new AbortController(),timeout=setTimeout(()=>ctrl.abort(),22000);let response;
+  try{response=await fetch(url,{signal:ctrl.signal,headers:{Accept:'application/octet-stream'}})}finally{clearTimeout(timeout)}
+  if(!response.ok)throw Error('NOMADS GRIB Filter HTTP '+response.status);
+  const bytes=new Uint8Array(await response.arrayBuffer());
+  if(bytes.length<32||String.fromCharCode(...bytes.slice(0,4))!=='GRIB')throw Error('NOAA did not return GRIB2 binary');
+  if(bytes.length>12500000)throw Error('NOAA subset exceeded maximum ingest size');
+  const decoded=[];
+  for(const message of splitMessages(bytes)){
+   for(const field of parseFields(message)){
+    const product=parseProduct(field.section4);
+    if(product.parameterCategory!==2||![2,3].includes(product.parameterNumber))continue;
+    const geometry=parseGrid(field.section3);
+    const {values}=decodeFieldValues(field);
+    decoded.push({component:product.parameterNumber===2?'u':'v',values,geometry});
+   }
   }
-  if(!response)throw Error('Both NOAA sources failed. '+errors.join('; '));
-  const data=await response.json(),columns=data.table?.columnNames||[],rows=data.table?.rows||[];
-  const ix=['latitude','longitude','ugrd10m','vgrd10m','time'].map(key=>columns.indexOf(key));
-  if(ix.some(i=>i<0))throw Error('NOAA changed its gridded response schema');
-  const points=rows.map(r=>({lat:Number(r[ix[0]]),lon:Number(r[ix[1]])>180?Number(r[ix[1]])-360:Number(r[ix[1]]),u:Number(r[ix[2]]),v:Number(r[ix[3]])})).filter(p=>[p.lat,p.lon,p.u,p.v].every(Number.isFinite)&&Math.abs(p.u)<150&&Math.abs(p.v)<150);
-  if(points.length<6)throw Error('NOAA returned insufficient wind samples');
-  res.setHeader('Cache-Control','s-maxage=900, stale-while-revalidate=600');
-  return res.status(200).json({points,validTime:rows[0][ix[4]],step:2,source:sourceName});
- }catch(error){console.error('NOAA wind upstream failure',String(error.message));return res.status(503).json({error:'NOAA wind temporarily unavailable: '+String(error.message).slice(0,180)})}
-}
+  const u=decoded.find(x=>x.component==='u'),v=decoded.find(x=>x.component==='v');
+  if(!u||!v)throw Error('GRIB2 did not contain paired 10m U/V wind fields');
+  const points=[];
+  for(let y=south;y<=north;y+=1)for(let x=west;x<=east;x+=1){
+   const a=nearestGridpoint(u.geometry,y,x),b=nearestGridpoint(v.geometry,y,x);
+   const eastward=Number(u.values[a.index]),northward=Number(v.values[b.index]);
+   if(Number.isFinite(eastward)&&Number.isFinite(northward)&&Math.abs(eastward)<160&&Math.abs(northward)<160)
+    points.push({lat:y,lon:x>180?x-360:x,u:eastward,v:northward});
+  }
+  if(points.length<50)throw Error('Incomplete NOAA model subset');
+  res.setHeader('Cache-Control','s-maxage=1200, stale-while-revalidate=600');
+  res.status(200).json({points,step:1,validTime:date+' '+cycle+':00 UTC (GFS f000)',modelRun:date+'T'+cycle+':00Z',forecastHour:0,source:'NOAA NOMADS GFS 0.25° GRIB2',coverage:{north,south,west,east}});
+ }catch(e){const cause=e.cause?.message||e.cause?.code||'';console.error('NOMADS GFS ingest error:',e.message,cause);res.status(503).json({error:'NOAA NOMADS GFS GRIB2 ingest unavailable: '+String(e.message).slice(0,140)})}
+};
