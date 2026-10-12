@@ -42,7 +42,7 @@ module.exports=async function(req,res){
  }
  if(!fields.height)throw Error('GFS Wave HTSGW missing from decoded GRIB2');
  const points=[];for(let y=south;y<=north;y++)for(let x=west;x<=east;x++){
-  const obj={lat:y,lon:x>180?x-360:x};
+  const obj={lat:y,lon:x-360*Math.round((x-lon)/360)};
   for(const [key,f] of Object.entries(fields)){const v=Number(f.values[nearestGridpoint(f.geometry,y,x).index]);if(Number.isFinite(v)&&v>=0&&v<(key.toLowerCase().includes('direction')?361:key.toLowerCase().includes('period')?61:41))obj[key]=v}
   if(Number.isFinite(obj.height))points.push(obj);
  }
