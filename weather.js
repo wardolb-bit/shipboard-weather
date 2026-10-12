@@ -22,8 +22,19 @@ const longitudeDelta=(a,b)=>Math.abs((((a-b+540)%360)+360)%360-180);
 const lonNear=(value,reference)=>value+360*Math.round((reference-value)/360);
 function nauticalCoord(value,isLat){const hemi=isLat?(value<0?'S':'N'):(value<0?'W':'E');let degrees=Math.floor(Math.abs(value)),minutes=(Math.abs(value)-degrees)*60;if(minutes>=59.9995){degrees++;minutes=0}return String(degrees).padStart(isLat?2:3,'0')+'° '+minutes.toFixed(3).padStart(6,'0')+'′ '+hemi}
 const speed=p=>Math.hypot(p.u,p.v)*1.943844;
-const stops=[0,8,15,23,30,40,50,65],palette=['#124d9e','#09b9f4','#13d0ba','#b5df37','#ffe052','#fa8639','#ec3670','#aa27bd'];
-function rgb(k){for(let i=1;i<stops.length;i++)if(k<=stops[i]){const t=Math.max(0,(k-stops[i-1])/(stops[i]-stops[i-1]));return [1,3,5].map(j=>Math.round(parseInt(palette[i-1].slice(j,j+2),16)*(1-t)+parseInt(palette[i].slice(j,j+2),16)*t))}return [170,39,189]}
+const palette=['#124d9e','#09b9f4','#13d0ba','#b5df37','#ffe052','#fa8639','#ec3670','#aa27bd'];
+const colorScales={
+ wind:{title:'10m WIND SPEED · KNOTS',stops:[0,8,15,23,30,40,50,65],ticks:['0','15','30','45','65+']},
+ gust:{title:'SURFACE WIND GUSTS · KNOTS',stops:[0,10,20,30,40,50,65,80],ticks:['0','20','40','60','80+']},
+ wave:{title:'SIGNIFICANT WAVE HEIGHT · FEET',stops:[0,3,6,10,15,20,30,40],ticks:['0','6','15','25','40+']}
+};
+function rgb(value,layer=mode){const stops=colorScales[layer].stops;for(let i=1;i<stops.length;i++)if(value<=stops[i]){const t=Math.max(0,(value-stops[i-1])/(stops[i]-stops[i-1]));return [1,3,5].map(j=>Math.round(parseInt(palette[i-1].slice(j,j+2),16)*(1-t)+parseInt(palette[i].slice(j,j+2),16)*t))}return [170,39,189]}
+function updateLegend(){
+ const scale=colorScales[mode],range=scale.stops.at(-1);
+ $('legendTitle').textContent=scale.title;
+ $('legendGradient').style.background='linear-gradient(90deg,'+palette.map((color,i)=>color+' '+(scale.stops[i]/range*100).toFixed(2)+'%').join(',')+')';
+ $('legendTicks').replaceChildren(...scale.ticks.map(value=>{const el=document.createElement('span');el.textContent=value;return el}));
+}
 function clock(){$('clock').textContent=new Date().toISOString().slice(11,19)+' UTC'}clock();setInterval(clock,1000);
 if(window.L){map=L.map('map',{worldCopyJump:true}).setView([lat,lon],5);L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors',maxZoom:19}).addTo(map);ship=L.marker([lat,lon],{icon:L.divIcon({className:'',iconSize:[32,32],iconAnchor:[16,16],html:'<svg viewBox="0 0 32 32" width="32"><path d="M16 2 27 29 16 24 5 29Z" fill="#41d5ec" stroke="white" stroke-width="2.5"/></svg>'})}).addTo(map);map.on('moveend',()=>{if(windOn){if(mode==='wave')loadWave(map.getCenter().lat,map.getCenter().lng);else refresh()}})}
 function nearestToVessel(data){if(!data?.points?.length)return null;let best=null,d=Infinity;for(const p of data.points){const distance=Math.abs(p.lat-lat)+longitudeDelta(p.lon,lon)*Math.cos(lat*Math.PI/180);if(distance<d){d=distance;best=p}}return d<3?best:null}
@@ -44,7 +55,7 @@ const lookup=new Map(pts.map(p=>[p.lat.toFixed(3)+','+p.lon.toFixed(3),p]));
 const get=(a,b)=>lookup.get(a.toFixed(3)+','+b.toFixed(3));
 const W=Math.max(256,Math.min(600,Math.ceil((east-west)*10))),H=Math.max(200,Math.min(550,Math.ceil((north-south)*10))),canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;
 const ctx=canvas.getContext('2d'),pixels=ctx.createImageData(W,H);
-for(let y=0;y<H;y++){const la=north-y/(H-1)*(north-south),la0=Math.max(south,Math.min(north-step,south+Math.floor((la-south)/step)*step)),la1=la0+step,fy=Math.max(0,Math.min(1,(la-la0)/step));for(let x=0;x<W;x++){const lo=west+x/(W-1)*(east-west),lo0=Math.max(west,Math.min(east-step,west+Math.floor((lo-west)/step)*step)),lo1=lo0+step,fx=Math.max(0,Math.min(1,(lo-lo0)/step));const a=get(la0,lo0),b=get(la0,lo1),c=get(la1,lo0),d=get(la1,lo1);if(!a||!b||!c||!d)continue;const mix=(k)=>a[k]*(1-fx)*(1-fy)+b[k]*fx*(1-fy)+c[k]*(1-fx)*fy+d[k]*fx*fy; if(mode==='wave'&&![a.height,b.height,c.height,d.height].every(Number.isFinite))continue;if(mode==='gust'&&![a.gust,b.gust,c.gust,d.gust].every(Number.isFinite))continue;const value=mode==='wave'?mix('height')*3.28084*1.5:mode==='gust'?mix('gust')*1.943844:Math.hypot(mix('u'),mix('v'))*1.943844,col=rgb(value),off=(y*W+x)*4;pixels.data[off]=col[0];pixels.data[off+1]=col[1];pixels.data[off+2]=col[2];pixels.data[off+3]=185}}
+for(let y=0;y<H;y++){const la=north-y/(H-1)*(north-south),la0=Math.max(south,Math.min(north-step,south+Math.floor((la-south)/step)*step)),la1=la0+step,fy=Math.max(0,Math.min(1,(la-la0)/step));for(let x=0;x<W;x++){const lo=west+x/(W-1)*(east-west),lo0=Math.max(west,Math.min(east-step,west+Math.floor((lo-west)/step)*step)),lo1=lo0+step,fx=Math.max(0,Math.min(1,(lo-lo0)/step));const a=get(la0,lo0),b=get(la0,lo1),c=get(la1,lo0),d=get(la1,lo1);if(!a||!b||!c||!d)continue;const mix=(k)=>a[k]*(1-fx)*(1-fy)+b[k]*fx*(1-fy)+c[k]*(1-fx)*fy+d[k]*fx*fy; if(mode==='wave'&&![a.height,b.height,c.height,d.height].every(Number.isFinite))continue;if(mode==='gust'&&![a.gust,b.gust,c.gust,d.gust].every(Number.isFinite))continue;const value=mode==='wave'?mix('height')*3.28084:mode==='gust'?mix('gust')*1.943844:Math.hypot(mix('u'),mix('v'))*1.943844,col=rgb(value),off=(y*W+x)*4;pixels.data[off]=col[0];pixels.data[off+1]=col[1];pixels.data[off+2]=col[2];pixels.data[off+3]=185}}
 ctx.putImageData(pixels,0,0);gradient=L.imageOverlay(canvas.toDataURL('image/png'),[[south,west+worldShift],[north,east+worldShift]],{interactive:false,opacity:.85}).addTo(map);
 if(arrowsOn&&mode==='wind'){arrows=L.layerGroup();const marks=[];for(const p of pts){const pixel=map.latLngToContainerPoint([p.lat,p.lon+worldShift]),size=map.getSize();if(pixel.x<0||pixel.y<0||pixel.x>size.x||pixel.y>size.y||marks.some(q=>Math.hypot(q.x-pixel.x,q.y-pixel.y)<70))continue;marks.push(pixel);const angle=Math.atan2(p.u,p.v)*180/Math.PI;const icon=L.divIcon({className:'',iconSize:[24,24],iconAnchor:[12,12],html:'<svg width="24" height="24" viewBox="0 0 24 24" style="transform:rotate('+angle+'deg);filter:drop-shadow(0 1px 2px #00131b)"><path d="M12 3 L12 20 M6 10 L12 3 L18 10" fill="none" stroke="#f3faff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'});L.marker([p.lat,p.lon+worldShift],{icon,interactive:false,keyboard:false}).addTo(arrows)}arrows.addTo(map)}
 sampleAtShip()}
@@ -61,7 +72,7 @@ async function loadWave(targetLat=lat,targetLon=lon){
   waveGrid=data;updateMarineCards();if(mode==='wave'){render();$('status').textContent='NOAA GFS Wave · significant combined seas';$('validTime').textContent='Valid: '+data.validTime}
  }catch(e){if(request!==waveRequest)return;$('status').textContent='NOAA GFS Wave unavailable · '+String(e.message).slice(0,72);$('waveInfo').textContent='Wave request failed';$('swellInfo').textContent='Wave request failed';if(mode==='wave'){clearLayers();$('info').textContent='No wave colors shown: '+e.message}}
 }
-function selectMode(next){mode=next;for(const key of ['wind','gust','wave']){$(key==='wind'?'windBtn':key==='gust'?'gustBtn':'waveBtn').style.opacity=key===mode?'1':'.55'}
+function selectMode(next){mode=next;updateLegend();for(const key of ['wind','gust','wave']){$(key==='wind'?'windBtn':key==='gust'?'gustBtn':'waveBtn').style.opacity=key===mode?'1':'.55'}
  if(mode==='wave'&&(!waveGrid||waveGrid.forecastHour!==forecastHour)){clearLayers();loadWave(map.getCenter().lat,map.getCenter().lng);return}
  if(mode==='gust'&&!grid?.points?.some(p=>Number.isFinite(p.gust))){clearLayers();$('status').textContent='NOAA gust field not available';return}
  render();$('status').textContent=mode==='wave'?'NOAA GFS Wave significant wave height':mode==='gust'?'NOAA GFS wind gusts':'NOAA GFS wind';}
@@ -79,4 +90,4 @@ for(const h of [0,6,12,18,24,36,48,72]){const b=document.createElement('button')
  for(const btn of $('steps').children)btn.style.borderColor=btn===b?'#6de0f8':'#376077';
  refresh();loadWave();
  };if(h===0)b.style.borderColor='#6de0f8';$('steps').appendChild(b)}
-$('timeStatus').textContent='Selected '+forecastLabel(0)+' · NOAA forecast valid time';refresh();setTimeout(loadWave,1500);
+$('timeStatus').textContent='Selected '+forecastLabel(0)+' · NOAA forecast valid time';updateLegend();refresh();setTimeout(loadWave,1500);
