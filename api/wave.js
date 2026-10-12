@@ -7,7 +7,7 @@ module.exports=async function(req,res){
  const run=new Date(Date.now()-8*3600000),date=run.toISOString().slice(0,10).replaceAll('-',''),cycle=String(Math.floor(run.getUTCHours()/6)*6).padStart(2,'0');
  const center=(lon+360)%360;if(center<12||center>348)return res.status(422).json({error:'Longitude seam subset support pending'});
  const north=Math.min(89,Math.ceil(lat+11)),south=Math.max(-89,Math.floor(lat-11)),west=Math.floor(center-11),east=Math.ceil(center+11);
- const params=new URLSearchParams({file:'gfswave.t'+cycle+'z.global.0p25.f000.grib2',dir:'/gfs.'+date+'/'+cycle+'/wave/gridded',subregion:'',leftlon:String(west),rightlon:String(east),toplat:String(north),bottomlat:String(south),var_HTSGW:'on',var_SWELL:'on',var_SWPER:'on',var_SWDIR:'on',lev_surface:'on',lev_1_in_sequence:'on'});
+ const params=new URLSearchParams({file:'gfswave.t'+cycle+'z.0p25.f000.grib2',dir:'/gfs.'+date+'/'+cycle+'/wave/gridded',subregion:'',leftlon:String(west),rightlon:String(east),toplat:String(north),bottomlat:String(south),var_HTSGW:'on',var_SWELL:'on',var_SWPER:'on',var_SWDIR:'on',lev_surface:'on',lev_1_in_sequence:'on'});
  const url='https://nomads.ncep.noaa.gov/cgi-bin/filter_gfswave.pl?'+params;
  const ctrl=new AbortController(),timeout=setTimeout(()=>ctrl.abort(),22000);let resp;
  try{resp=await fetch(url,{signal:ctrl.signal})}finally{clearTimeout(timeout)}
