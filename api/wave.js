@@ -21,7 +21,7 @@ module.exports=async function(req,res){
   const geometry=parseGrid(f.section3),decoded=decodeFieldValues(f);
   fields[name]={geometry,values:decoded.values};
  }
- if(!fields.height)throw Error('GFS Wave significant wave height field missing');
+ if(!fields.height)throw Error('GFS Wave significant height unavailable; fields='+Object.keys(fields).join(','));
  const points=[];for(let y=south;y<=north;y++)for(let x=west;x<=east;x++){
   const obj={lat:y,lon:x>180?x-360:x};
   for(const [key,f] of Object.entries(fields)){const v=Number(f.values[nearestGridpoint(f.geometry,y,x).index]);if(Number.isFinite(v)&&v>=0&&v<999)obj[key]=v}
