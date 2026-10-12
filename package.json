@@ -1,0 +1,8 @@
+{
+  "name": "shipboard-weather",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@azohra/meteo.grib": "0.1.4"
+  }
+}
