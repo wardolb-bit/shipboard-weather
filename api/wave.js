@@ -7,7 +7,7 @@ module.exports=async function(req,res){
  const run=new Date(Date.now()-8*3600000),date=run.toISOString().slice(0,10).replaceAll('-',''),cycle=String(Math.floor(run.getUTCHours()/6)*6).padStart(2,'0');
  const center=(lon+360)%360;if(center<12||center>348)return res.status(422).json({error:'Longitude seam subset support pending'});
  const north=Math.min(89,Math.ceil(lat+11)),south=Math.max(-89,Math.floor(lat-11)),west=Math.floor(center-11),east=Math.ceil(center+11);
- const params=new URLSearchParams({file:'gfswave.t'+cycle+'z.0p25.f000.grib2',dir:'/gfs.'+date+'/'+cycle+'/wave/gridded',subregion:'',leftlon:String(west),rightlon:String(east),toplat:String(north),bottomlat:String(south),var_HTSGW:'on',var_SWELL:'on',var_SWPER:'on',var_SWDIR:'on',lev_surface:'on',lev_1_in_sequence:'on'});
+ const params=new URLSearchParams({file:'gfswave.t'+cycle+'z.global.0p25.f000.grib2',dir:'/gfs.'+date+'/'+cycle+'/wave/gridded',subregion:'',leftlon:String(west),rightlon:String(east),toplat:String(north),bottomlat:String(south),var_HTSGW:'on',var_PERPW:'on',var_DIRPW:'on',var_SWELL:'on',var_SWPER:'on',var_SWDIR:'on',lev_surface:'on',lev_1_in_sequence:'on'});
  const url='https://nomads.ncep.noaa.gov/cgi-bin/filter_gfswave.pl?'+params;
  const ctrl=new AbortController(),timeout=setTimeout(()=>ctrl.abort(),22000);let resp;
  try{resp=await fetch(url,{signal:ctrl.signal})}finally{clearTimeout(timeout)}
@@ -15,16 +15,17 @@ module.exports=async function(req,res){
  const bytes=new Uint8Array(await resp.arrayBuffer());if(bytes.length<32||String.fromCharCode(...bytes.slice(0,4))!=='GRIB')throw Error('GFS Wave did not return GRIB2');if(bytes.length>12500000)throw Error('GFS Wave subset exceeds size limit');
  const fields={};
  for(const message of splitMessages(bytes))for(const f of parseFields(message)){
-  const p=parseProduct(f.section4);if(p.parameterCategory!==0||![3,7,8,9].includes(p.parameterNumber))continue;
-  const name=({3:'height',7:'direction',8:'swell',9:'period'})[p.parameterNumber];
+  if(f.discipline!==10)continue;
+  const p=parseProduct(f.section4);if(p.parameterCategory!==0||![3,7,8,9,10,11].includes(p.parameterNumber))continue;
+  const name=({3:'height',7:'swellDirection',8:'swell',9:'swellPeriod',10:'direction',11:'period'})[p.parameterNumber];
   if(fields[name])continue;
   const geometry=parseGrid(f.section3),decoded=decodeFieldValues(f);
   fields[name]={geometry,values:decoded.values};
  }
- if(!fields.height)throw Error('GFS Wave significant height unavailable; fields='+Object.keys(fields).join(','));
+ if(!fields.height)throw Error('GFS Wave HTSGW missing from decoded GRIB2');
  const points=[];for(let y=south;y<=north;y++)for(let x=west;x<=east;x++){
   const obj={lat:y,lon:x>180?x-360:x};
-  for(const [key,f] of Object.entries(fields)){const v=Number(f.values[nearestGridpoint(f.geometry,y,x).index]);if(Number.isFinite(v)&&v>=0&&v<999)obj[key]=v}
+  for(const [key,f] of Object.entries(fields)){const v=Number(f.values[nearestGridpoint(f.geometry,y,x).index]);if(Number.isFinite(v)&&v>=0&&v<(key.toLowerCase().includes('direction')?361:key.toLowerCase().includes('period')?61:41))obj[key]=v}
   if(Number.isFinite(obj.height))points.push(obj);
  }
  if(points.length<10)throw Error('NOAA returned insufficient marine wave grid points');
