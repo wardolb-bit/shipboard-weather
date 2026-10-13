@@ -23,27 +23,40 @@ module.exports=async function(req,res){
  }
  if(!selected)throw Error('No published GFS Wave model covering requested UTC hour');
  const {date,cycle,modelForecastHour}=selected;
- const center=(lon+360)%360;if(center<12||center>348)return res.status(422).json({error:'Longitude seam subset support pending'});
- const north=Math.min(89,Math.ceil(lat+11)),south=Math.max(-89,Math.floor(lat-11)),west=Math.floor(center-11),east=Math.ceil(center+11);
- const params=new URLSearchParams({file:'gfswave.t'+cycle+'z.global.0p25.f'+String(modelForecastHour).padStart(3,'0')+'.grib2',dir:'/gfs.'+date+'/'+cycle+'/wave/gridded',subregion:'',leftlon:String(west),rightlon:String(east),toplat:String(north),bottomlat:String(south),var_HTSGW:'on',var_PERPW:'on',var_DIRPW:'on',var_SWELL:'on',var_SWPER:'on',var_SWDIR:'on',lev_surface:'on',lev_1_in_sequence:'on'});
- const url='https://nomads.ncep.noaa.gov/cgi-bin/filter_gfswave.pl?'+params;
- const ctrl=new AbortController(),timeout=setTimeout(()=>ctrl.abort(),22000);let resp;
- try{resp=await fetch(url,{signal:ctrl.signal})}finally{clearTimeout(timeout)}
- if(!resp.ok)throw Error('NOAA GFS Wave HTTP '+resp.status);
- const bytes=new Uint8Array(await resp.arrayBuffer());if(bytes.length<32||String.fromCharCode(...bytes.slice(0,4))!=='GRIB')throw Error('GFS Wave did not return GRIB2');if(bytes.length>12500000)throw Error('GFS Wave subset exceeds size limit');
- const fields={};
- for(const message of splitMessages(bytes))for(const f of parseFields(message)){
-  if(f.discipline!==10)continue;
-  const p=parseProduct(f.section4);if(p.parameterCategory!==0||![3,7,8,9,10,11].includes(p.parameterNumber))continue;
-  const name=({3:'height',7:'swellDirection',8:'swell',9:'swellPeriod',10:'direction',11:'period'})[p.parameterNumber];
-  if(fields[name])continue;
-  const geometry=parseGrid(f.section3),decoded=decodeFieldValues(f);
-  fields[name]={geometry,values:decoded.values};
- }
- if(!fields.height)throw Error('GFS Wave HTSGW missing from decoded GRIB2');
+ const center=(lon+360)%360,west=Math.floor(center-11),east=Math.ceil(center+11);
+ const north=Math.min(89,Math.ceil(lat+11)),south=Math.max(-89,Math.floor(lat-11));
+ const file='gfswave.t'+cycle+'z.global.0p25.f'+String(modelForecastHour).padStart(3,'0')+'.grib2';
+ const base={file,dir:'/gfs.'+date+'/'+cycle+'/wave/gridded',subregion:'',toplat:String(north),bottomlat:String(south),var_HTSGW:'on',var_PERPW:'on',var_DIRPW:'on',var_SWELL:'on',var_SWPER:'on',var_SWDIR:'on',lev_surface:'on',lev_1_in_sequence:'on'};
+ const filter='https://nomads.ncep.noaa.gov/cgi-bin/filter_gfswave.pl?';
+ // NOAA's 0..360° seam: request each side separately and sample from its own GRIB geometry.
+ const regions=west<0?[[west+360,359.99],[0,east]]:east>360?[[west,359.99],[0,east-360]]:[[west,east]];
+ const segments=await Promise.all(regions.map(async([left,right])=>{
+  const q=new URLSearchParams({...base,leftlon:String(left),rightlon:String(right)});
+  const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),22000);let response;
+  try{response=await fetch(filter+q,{signal:ctrl.signal})}finally{clearTimeout(timer)}
+  if(!response.ok)throw Error('NOAA GRIB filter HTTP '+response.status);
+  const bytes=new Uint8Array(await response.arrayBuffer());
+  if(bytes.length<32||String.fromCharCode(...bytes.slice(0,4))!=='GRIB'||bytes.length>12500000)throw Error('Invalid NOAA GRIB subset');
+  return {bytes,left,right};
+ }));
+ const inRegion=(x,r)=>x>=r.left-0.01&&x<=r.right+0.01;
+ const sourceLongitude=x=>((x%360)+360)%360;
+ const segmentFields=segments.map(segment=>{
+  const fields={};
+  for(const message of splitMessages(segment.bytes))for(const f of parseFields(message)){
+   if(f.discipline!==10)continue;
+   const p=parseProduct(f.section4);if(p.parameterCategory!==0||![3,7,8,9,10,11].includes(p.parameterNumber))continue;
+   const name=({3:'height',7:'swellDirection',8:'swell',9:'swellPeriod',10:'direction',11:'period'})[p.parameterNumber];
+   if(fields[name])continue;const geometry=parseGrid(f.section3),decoded=decodeFieldValues(f);
+   fields[name]={geometry,values:decoded.values};
+  }
+  if(!fields.height)throw Error('GFS Wave HTSGW missing in segment');
+  return {...segment,fields};
+ });
  const points=[];for(let y=south;y<=north;y++)for(let x=west;x<=east;x++){
+  const nx=sourceLongitude(x),segment=segmentFields.find(r=>inRegion(nx,r));if(!segment)continue;
   const obj={lat:y,lon:x-360*Math.round((x-lon)/360)};
-  for(const [key,f] of Object.entries(fields)){const v=Number(f.values[nearestGridpoint(f.geometry,y,x).index]);if(Number.isFinite(v)&&v>=0&&v<(key.toLowerCase().includes('direction')?361:key.toLowerCase().includes('period')?61:41))obj[key]=v}
+  for(const [key,f] of Object.entries(segment.fields)){const v=Number(f.values[nearestGridpoint(f.geometry,y,nx).index]);if(Number.isFinite(v)&&v>=0&&v<(key.toLowerCase().includes('direction')?361:key.toLowerCase().includes('period')?61:41))obj[key]=v}
   if(Number.isFinite(obj.height))points.push(obj);
  }
  if(points.length<10)throw Error('NOAA returned insufficient marine wave grid points');
