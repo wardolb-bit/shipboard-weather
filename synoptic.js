@@ -103,7 +103,7 @@
   }
   const key=p=>p[0].toFixed(6)+','+p[1].toFixed(6);
   const items=[];
-  for(const [,segmentsAtLevel] of segments){
+  for(const [level,segmentsAtLevel] of segments){
    const adjacency=new Map();
    segmentsAtLevel.forEach((seg,i)=>seg.forEach(p=>{const k=key(p);if(!adjacency.has(k))adjacency.set(k,[]);adjacency.get(k).push(i)}));
    const visited=new Set();
