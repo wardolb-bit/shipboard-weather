@@ -314,7 +314,7 @@ function showContextMenu(event){
  item('Pressure centers: '+(window.synoptic?.flags.centers?'ON':'OFF'),()=>window.synoptic?.toggle('centers'));
  item('Wave contours: '+(window.synoptic?.flags.waves?'ON':'OFF'),()=>window.synoptic?.toggle('waves'));
  item('Swell direction: '+(window.synoptic?.flags.swell?'ON':'OFF'),()=>window.synoptic?.toggle('swell'));
- item('Weather fronts (official feed unavailable)',()=>window.synoptic?.frontsInfo());
+ item('Official NOAA fronts: '+(window.synoptic?.flags.fronts?'ON':'OFF'),()=>window.synoptic?.toggle('fronts'));
  item((mode==='wind'?'✓ ':'')+'Wind',()=>{windOn=true;selectMode('wind')});
  item((mode==='gust'?'✓ ':'')+'Gusts',()=>{windOn=true;selectMode('gust')});
  item((mode==='wave'?'✓ ':'')+'Waves',()=>{windOn=true;selectMode('wave')});
