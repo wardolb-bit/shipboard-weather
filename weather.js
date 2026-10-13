@@ -299,6 +299,27 @@ let bridgeRetries=0,bridgeRetryTimer=null,bridgeHeartbeat=null,lastOwnshipAt=0;
 function updateHud(){const cog=$('hudCog'),sog=$('hudSog'),feed=$('hudFeed');if(!cog)return;cog.textContent=Number.isFinite(liveCog)?Math.round(liveCog).toString().padStart(3,'0')+'°':'--';sog.textContent=Number.isFinite(liveSog)?liveSog.toFixed(1)+' kt':'--';const connected=ws?.readyState===WebSocket.OPEN;const fresh=connected&&lastOwnshipAt>0&&Date.now()-lastOwnshipAt<90000;
  feed.textContent=fresh?'LIVE':connected?'WAITING AIS':'OFFLINE';feed.style.color=fresh?'#7fe2c9':'#e5c277';$('hudForecast').textContent='+'+forecastHour+'h · '+validAtFor(forecastHour).slice(11,16)+'Z'}
 
+// Own-ship AIS decoder adapted from NavDashConsole.tsx (read-only source reference).
+function navdashOwnshipSentence(message){
+ const candidates=[message?.line,message?.sentence,message?.nmea,message?.raw,message?.data,message?.payload,message];
+ return candidates.find(v=>typeof v==='string'&&v.trim().startsWith('!AIVDO'))?.trim()||'';
+}
+function navdashOwnshipDecode(sentence){
+ try{
+  if(!sentence.startsWith('!AIVDO'))return null;
+  const parts=sentence.split(',');if(parts[1]!=='1'||!parts[5])return null;
+  const bits=[...parts[5]].map(char=>{let value=char.charCodeAt(0)-48;if(value>40)value-=8;return value.toString(2).padStart(6,'0')}).join('');
+  const uint=(start,n)=>parseInt(bits.slice(start,start+n),2);
+  const sint=(start,n)=>{const raw=uint(start,n),sign=2**(n-1);return raw>=sign?raw-2**n:raw};
+  const type=uint(0,6),offset=[1,2,3].includes(type)?[50,61,89,116]:[18,19].includes(type)?[46,57,85,112]:null;
+  if(!offset)return null;
+  const [speedBit,lonBit,latBit,courseBit]=offset;
+  const lat=sint(latBit,27)/600000,lon=sint(lonBit,28)/600000;
+  if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180)return null;
+  const sogRaw=uint(speedBit,10),cogRaw=uint(courseBit,12);
+  return {lat,lon,sog:sogRaw===1023?null:sogRaw/10,cog:cogRaw===3600?null:cogRaw/10};
+ }catch{return null}
+}
 function connectBridge(){
  if(bridgeRetryTimer){clearTimeout(bridgeRetryTimer);bridgeRetryTimer=null}
  $('bridge').textContent=bridgeRetries?'BRIDGE RECONNECTING':'BRIDGE CONNECTING';
@@ -315,8 +336,10 @@ function connectBridge(){
  socket.onmessage=e=>{
   if(ws!==socket)return;
   try{
-   const v=JSON.parse(e.data);
-   const own=v.ownship&&typeof v.ownship==='object'?v.ownship:v.data&&typeof v.data==='object'?v.data:v;
+   let v=e.data;try{v=JSON.parse(e.data)}catch{}
+   const aivdo=navdashOwnshipDecode(navdashOwnshipSentence(v));
+   if(aivdo){lastOwnshipAt=Date.now();updateShip(aivdo.lat,aivdo.lon,aivdo.cog,aivdo.sog);return}
+   const own=v&&typeof v==='object'?(v.ownship&&typeof v.ownship==='object'?v.ownship:v.data&&typeof v.data==='object'?v.data:v):{};
    const tag=String(own.source??v.source??own.type??v.type??'').toLowerCase();
    if(tag==='aivdo'||tag==='ownship'||own.isOwnship===true||v.type==='ownship'){
     const a=Number(own.lat??own.latitude),b=Number(own.lon??own.lng??own.longitude);
