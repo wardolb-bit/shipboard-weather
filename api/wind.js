@@ -50,9 +50,9 @@ module.exports=async function(req,res){
     const geometry=parseGrid(field.section3),{values}=decodeFieldValues(field);
     decoded.push({component:product.parameterCategory===3?'mslp':product.parameterNumber===2?'u':product.parameterNumber===3?'v':'gust',values,geometry});
    }
-   const u=decoded.find(x=>x.component==='u'),v=decoded.find(x=>x.component==='v'),gust=decoded.find(x=>x.component==='gust');
+   const u=decoded.find(x=>x.component==='u'),v=decoded.find(x=>x.component==='v'),gust=decoded.find(x=>x.component==='gust'),mslp=decoded.find(x=>x.component==='mslp');
    if(!u||!v)throw Error('GRIB2 missing paired 10m wind fields');
-   return {...segment,u,v,gust};
+   return {...segment,u,v,gust,mslp};
   });
   const points=[];
   const at=(y,x)=>{const nx=sourceLongitude(x),segment=segmentFields.find(r=>inRegion(nx,r));if(!segment)return null;
