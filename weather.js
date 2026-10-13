@@ -113,6 +113,7 @@ async function refreshComparison(){
    const wind=w.value.shipSample||compareClosest(w.value,pos);
    if(wind){$('comp'+letter+'wind').textContent=speed(wind).toFixed(0)+' kt';$('comp'+letter+'gust').textContent=Number.isFinite(wind.gust)?(wind.gust*1.943844).toFixed(0)+' kt':'--';$('comp'+letter+'dir').textContent=Math.round((Math.atan2(-wind.u,-wind.v)*180/Math.PI+360)%360)+'° · '+bearingSector((Math.atan2(-wind.u,-wind.v)*180/Math.PI+360)%360,motion.course)}
   }
+  window.vesselAdvisories?.flagComparison(letter);
   if(sea.status==='fulfilled'){
    const p=compareClosest(sea.value,pos);
    if(p){$('comp'+letter+'sea').textContent=Number.isFinite(p.height)?(p.height*3.28084).toFixed(1)+' ft':'--';$('comp'+letter+'swell').textContent=Number.isFinite(p.swell)?(p.swell*3.28084).toFixed(1)+' ft':'--';$('comp'+letter+'waveDir').textContent=Number.isFinite(p.direction)?Math.round(p.direction)+'° · '+bearingSector(p.direction,motion.course):'--'}
@@ -215,6 +216,7 @@ function updateMarineCards(){
  $('waveInfo').textContent=sea&&Number.isFinite(sea.height)?'Combined wind waves + swell':'Wave grid not available';
  $('swellValue').textContent=sea&&Number.isFinite(sea.swell)?(sea.swell*3.28084).toFixed(1)+' ft':'--';
  $('swellInfo').textContent=sea&&Number.isFinite(sea.period)?'Period '+sea.period.toFixed(0)+' s'+(Number.isFinite(sea.direction)?' · '+Math.round(sea.direction)+'°':''):'Primary swell component pending';
+ window.vesselAdvisories?.update();
 }
 function sampleAtShip(){updateMarineCards();if(!grid)return;const pos=positionAtHour(forecastHour);if(!pos)return;const sampleLat=pos.lat,sampleLon=pos.lon;let nearest=null,d=Infinity;for(const p of grid.points){const delta=Math.abs(p.lat-sampleLat)+longitudeDelta(p.lon,sampleLon)*Math.cos(sampleLat*Math.PI/180);if(delta<d){d=delta;nearest=p}}const exact=grid.shipSample;const selected=exact&&Math.abs(exact.lat-sampleLat)<0.15&&longitudeDelta(exact.lon,sampleLon)<0.15?exact:nearest;if(selected&&(selected===exact||d<3)){$('wind').textContent=speed(selected).toFixed(0)+' kt';$('direction').textContent=Math.round((Math.atan2(-selected.u,-selected.v)*180/Math.PI+360)%360)+'° FROM · NOAA GFS'}else{$('wind').textContent='--';$('direction').textContent='Vessel outside forecast grid'}}
 function clearLayers(){if(gradient){map.removeLayer(gradient);gradient=null}if(arrows){map.removeLayer(arrows);arrows=null}}
@@ -274,6 +276,7 @@ function showContextMenu(event){
  item('Vessel encounter',()=>{if(comparing)setComparison(false);$('encounterMode').value='encounter';$('encounterMode').dispatchEvent(new Event('change'))});
  item((comparing?'✓ ':'')+'Compare courses',()=>$('compareBtn').click());
  item('Voyage route planner',()=>window.routePlanner?.open());
+ item('Vessel weather advisories',()=>window.vesselAdvisories?.open());
  item('Course / speed settings',()=>{if(comparing)setComparison(false);$('encounterMode').value='encounter';$('encounterMode').dispatchEvent(new Event('change'));$('manualMotion').checked=true;$('manualMotion').dispatchEvent(new Event('change'))});
  separator();heading('MAP & DATA');
  item('Center on vessel',()=>$('center').click());
@@ -295,6 +298,6 @@ for(const h of [0,6,12,18,24,36,48,72]){const b=document.createElement('button')
  if(forecastHour===h)return;forecastHour=h;sequence++;waveRequest++;clearTimeout(debounce);const instant=restoreHourFrame();if(!instant){$('status').textContent='Loading NOAA forecast · retaining previous map until ready';$('wind').textContent='--';$('direction').textContent='Loading NOAA forecast'};
  $('timeStatus').textContent='Selected '+forecastLabel(h)+' · retrieving NOAA wind and waves';
  for(const btn of $('steps').children)btn.style.borderColor=btn===b?'#6de0f8':'#376077';
- if(!instant)reloadEncounter();else updateProjection();if(comparing)refreshComparison();document.dispatchEvent(new CustomEvent('weather-hour-changed',{detail:{hour:h}}));
+ if(!instant)reloadEncounter();else updateProjection();if(comparing)refreshComparison();window.vesselAdvisories?.update();document.dispatchEvent(new CustomEvent('weather-hour-changed',{detail:{hour:h}}));
  };if(h===0)b.style.borderColor='#6de0f8';$('steps').appendChild(b)}
 $('timeStatus').textContent='Selected '+forecastLabel(0)+' · NOAA forecast valid time';updateLegend();updateProjection();refresh();setTimeout(loadWave,1500);
