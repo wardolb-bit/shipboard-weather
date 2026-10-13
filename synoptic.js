@@ -52,7 +52,8 @@
  function pressure(){
   if(!flags.pressure){remove('pressure');return}
   const data=grid;
-  plot('pressure',contours(data,'mslp',Array.from({length:41},(_,i)=>920+i*4),'#e1eafa'))
+  if(valid(data)&&!data.points.some(p=>Number.isFinite(p.mslp))){remove('pressure');$('status').textContent='NOAA pressure field unavailable · isobars not shown';return}
+  plot('pressure',contours(data,'mslp',Array.from({length:81},(_,i)=>920+i*2),'#edf3ff'))
  }
  function waveContours(){
   if(!flags.waves){remove('waves');return}
