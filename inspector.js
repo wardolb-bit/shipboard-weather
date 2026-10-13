@@ -1,7 +1,7 @@
 'use strict';
 // Read-only NOAA map inspector; does not trigger network requests.
 (()=>{
- const area=document.querySelector('.maparea');if(!area||typeof map==='undefined')return;
+ const area=document.querySelector('#inspectorMount');if(!area||typeof map==='undefined')return;
  const card=document.createElement('section');card.id='weatherInspector';card.className='weather-inspector';card.hidden=true;
  card.innerHTML='<div class="wi-head"><strong>◎ WEATHER INSPECTOR</strong><button type="button" id="wiClose" title="Unpin inspector" aria-label="Unpin inspector">×</button></div><div id="wiLocation" class="wi-location"></div><div id="wiMetrics" class="wi-metrics"></div><div id="wiValid" class="wi-valid"></div>';
  area.appendChild(card);
@@ -38,5 +38,6 @@
  card.addEventListener('click',e=>e.stopPropagation());
  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&pinned){pinned=null;card.hidden=true}});
  document.addEventListener('weather-hour-changed',()=>{if(pinned)show(pinned);else if(last&&!card.hidden)show(last)});
+ document.addEventListener('weather-grid-updated',()=>{if(pinned)show(pinned);else if(last&&!card.hidden)show(last)});
  map.on('moveend',()=>{if(pinned)show(pinned)});
 })();
