@@ -6,7 +6,7 @@ const requestCache=new Map(),CACHE_TTL_MS=20*60*1000;
 const renderedFrames=new WeakMap(),hourFrames=new Map();
 function frameLocation(){const p=positionAtHour(forecastHour);return encounterMode==='encounter'?p:map.getCenter()}
 function frameKey(hour,point){return hour+'|'+Math.round(point.lat*2)/2+'|'+Math.round((point.lng??point.lon)*2)/2}
-function saveHourFrame(){const point=frameLocation();if(!point||!grid||!waveGrid||grid.validTime!==validAtFor(forecastHour)||waveGrid.validTime!==validAtFor(forecastHour))return;hourFrames.set(frameKey(forecastHour,point),{wind:grid,wave:waveGrid,at:Date.now()});if(hourFrames.size>24)hourFrames.delete(hourFrames.keys().next().value);if(hourFrames.size===1)setTimeout(preloadNearby,2000)}
+function saveHourFrame(){const point=frameLocation();if(!point||!grid||!waveGrid||grid.validTime!==validAtFor(forecastHour)||waveGrid.validTime!==validAtFor(forecastHour))return;hourFrames.set(frameKey(forecastHour,point),{wind:grid,wave:waveGrid,at:Date.now()});if(hourFrames.size>24)hourFrames.delete(hourFrames.keys().next().value);if(hourFrames.size===1)setTimeout(preloadNearby,2000);if(typeof markForecastAdvisories==='function')markForecastAdvisories()}
 let preloading=false;
 async function preloadNearby(){if(preloading||hourFrames.size===0)return;preloading=true;const selected=forecastHour;const candidates=[6,12,24,18,36,48,72,0].filter(h=>h!==selected);for(const h of candidates.slice(0,3)){const p=encounterMode==='encounter'?positionAtHour(h):map.getCenter();if(!p)continue;const c={lat:p.lat,lng:p.lng??p.lon};if(hourFrames.has(frameKey(h,c)))continue;await Promise.allSettled([forecastData('wind',c,h),forecastData('wave',c,h)]);await new Promise(resolve=>setTimeout(resolve,500))}preloading=false}
 function restoreHourFrame(){const point=frameLocation();if(!point)return false;const entry=hourFrames.get(frameKey(forecastHour,point));if(!entry||Date.now()-entry.at>CACHE_TTL_MS)return false;grid=entry.wind;waveGrid=entry.wave;updateMarineCards();updateProjection();render();$('status').textContent='Cached NOAA forecast · instant frame';$('validTime').textContent='Valid: '+validAtFor(forecastHour);return true}
@@ -171,15 +171,13 @@ async function analyzeTracks(){
 $('analyzeTracks').onclick=analyzeTracks;
 let animationTimer=null;
 function stopAnimation(){if(animationTimer){clearInterval(animationTimer);animationTimer=null}$('playForecast').textContent='▶ PLAY'}
-function toggleAnimation(){
- if(animationTimer){stopAnimation();return}
- $('playForecast').textContent='❚❚ PAUSE';
- animationTimer=setInterval(()=>{
-  const buttons=[...$('steps').children],idx=buttons.findIndex(b=>Number(b.dataset.hour)===forecastHour);
-  buttons[(idx+1)%buttons.length].click();
- },1500);
-}
+function startPlayback(){stopAnimation();$('playForecast').textContent='❚❚ PAUSE';animationTimer=setInterval(()=>{const buttons=[...$('steps').children],idx=buttons.findIndex(b=>Number(b.dataset.hour)===forecastHour);buttons[(idx+1)%buttons.length].click()},Number($('playbackSpeed').value))}
+function toggleAnimation(){if(animationTimer)stopAnimation();else startPlayback()}
 $('playForecast').onclick=toggleAnimation;
+$('playbackSpeed').onchange=()=>{if(animationTimer)startPlayback()};
+$('forecastScrubber').oninput=e=>{const b=$('steps').children[Number(e.target.value)];if(b)b.click()};
+function markForecastAdvisories(){const get=window.vesselAdvisories?.get();if(!get)return;for(const btn of $('steps').children){const h=Number(btn.dataset.hour),p=encounterMode==='encounter'?positionAtHour(h):map.getCenter();if(!p)continue;const entry=hourFrames.get(frameKey(h,p));if(!entry||Date.now()-entry.at>CACHE_TTL_MS){btn.classList.remove('alert-hour');continue}const w=entry.wind?.shipSample,sea=entry.wave?.points?.reduce((best,x)=>{const d=Math.abs(x.lat-p.lat)+longitudeDelta(x.lon,p.lon);return d<best.d?{p:x,d}:best},{p:null,d:Infinity}).p;const exceed=(w&&Math.hypot(w.u,w.v)*1.943844>=get.wind)||(w&&Number.isFinite(w.gust)&&w.gust*1.943844>=get.gust)||(sea&&Number.isFinite(sea.height)&&sea.height*3.28084>=get.sea);btn.classList.toggle('alert-hour',!!exceed)}}
+document.addEventListener('vessel-advisories-changed',markForecastAdvisories);
 function setComparison(enabled){
  comparing=enabled;compareSequence++;if(!enabled)analysisRun++;
  $('comparePanel').hidden=!enabled;$('compareResults').hidden=!enabled;$('singleWeather').style.display=enabled?'none':'';
@@ -339,7 +337,7 @@ document.addEventListener('keydown',event=>{if(event.key==='Escape')closeContext
 for(const h of [0,6,12,18,24,36,48,72]){const b=document.createElement('button');b.textContent='+'+h+'h · '+forecastLabel(h);b.title=validAtFor(h);b.dataset.hour=String(h);b.onclick=()=>{
  if(forecastHour===h)return;forecastHour=h;updateHud();sequence++;waveRequest++;clearTimeout(debounce);const instant=restoreHourFrame();if(!instant){$('status').textContent='Loading NOAA forecast · retaining previous map until ready';$('wind').textContent='--';$('direction').textContent='Loading NOAA forecast'};
  $('timeStatus').textContent='Selected '+forecastLabel(h)+' · retrieving NOAA wind and waves';
- for(const btn of $('steps').children)btn.style.borderColor=btn===b?'#6de0f8':'#376077';
+ $('forecastScrubber').value=[...$('steps').children].indexOf(b);$('playbackValid').textContent='+'+h+'h';for(const btn of $('steps').children)btn.classList.toggle('selected',btn===b);
  if(!instant)reloadEncounter();else updateProjection();if(comparing)refreshComparison();window.vesselAdvisories?.update();document.dispatchEvent(new CustomEvent('weather-hour-changed',{detail:{hour:h}}));
- };if(h===0)b.style.borderColor='#6de0f8';$('steps').appendChild(b)}
+ };if(h===0)b.classList.add('selected');$('steps').appendChild(b)}
 $('timeStatus').textContent='Selected '+forecastLabel(0)+' · NOAA forecast valid time';updateLegend();updateProjection();updateHud();refresh();setTimeout(loadWave,1500);
