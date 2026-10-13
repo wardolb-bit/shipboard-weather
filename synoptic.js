@@ -30,18 +30,25 @@
  // Marching squares yields short, accurate isopleth segments from actual gridded values.
  // Join marching-square segments by shared endpoints, then smooth their display geometry.
  // NOAA pressure values and contour levels stay unchanged.
+ // Cubic interpolation creates a smooth visual contour through joined NOAA isoline points.
+ // Closed loops receive periodic tangents, avoiding the sharp closing corner.
  function smoothContour(points){
   if(points.length<3)return points;
-  let line=points;
-  for(let pass=0;pass<2;pass++){
-   const next=[line[0]];
-   for(let i=0;i<line.length-1;i++){
-    const a=line[i],b=line[i+1];
-    next.push([.75*a[0]+.25*b[0],.75*a[1]+.25*b[1]],[.25*a[0]+.75*b[0],.25*a[1]+.75*b[1]]);
+  const closed=Math.hypot(points[0][0]-points.at(-1)[0],points[0][1]-points.at(-1)[1])<1e-4;
+  const source=closed?points.slice(0,-1):points;
+  const n=source.length;if(n<3)return points;
+  const point=i=>closed?source[(i%n+n)%n]:source[Math.max(0,Math.min(n-1,i))];
+  const result=[];
+  for(let i=0;i<(closed?n:n-1);i++){
+   const p0=point(i-1),p1=point(i),p2=point(i+1),p3=point(i+2);
+   const segments=5;
+   for(let j=0;j<segments;j++){
+    const t=j/segments,t2=t*t,t3=t2*t;
+    result.push([0,1].map(k=>.5*((2*p1[k])+(-p0[k]+p2[k])*t+(2*p0[k]-5*p1[k]+4*p2[k]-p3[k])*t2+(-p0[k]+3*p1[k]-3*p2[k]+p3[k])*t3)));
    }
-   next.push(line[line.length-1]);line=next;
   }
-  return line
+  result.push(closed?result[0]:source[n-1]);
+  return result
  }
  function contours(data,field,levels,color){
   const items=[];if(!valid(data))return items;
@@ -88,7 +95,7 @@
     }
     if(line.length<2)continue;
     const smooth=field==='mslp'?smoothContour(line):line;
-    items.push(L.polyline(smooth.map(p=>[p[0],wrap(p[1],map.getCenter().lng)]),{color,weight:field==='mslp'?1.6:1.25,opacity:.9,interactive:false,smoothFactor:.5}));
+    items.push(L.polyline(smooth.map(p=>[p[0],wrap(p[1],map.getCenter().lng)]),{color,weight:field==='mslp'?1.6:1.25,opacity:.9,interactive:false,smoothFactor:0}));
    }
   }
   return items
