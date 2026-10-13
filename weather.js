@@ -6,7 +6,9 @@ const requestCache=new Map(),CACHE_TTL_MS=20*60*1000;
 const renderedFrames=new WeakMap(),hourFrames=new Map();
 function frameLocation(){const p=positionAtHour(forecastHour);return encounterMode==='encounter'?p:map.getCenter()}
 function frameKey(hour,point){return hour+'|'+Math.round(point.lat*2)/2+'|'+Math.round((point.lng??point.lon)*2)/2}
-function saveHourFrame(){const point=frameLocation();if(!point||!grid||!waveGrid)return;hourFrames.set(frameKey(forecastHour,point),{wind:grid,wave:waveGrid,at:Date.now()});if(hourFrames.size>24)hourFrames.delete(hourFrames.keys().next().value)}
+function saveHourFrame(){const point=frameLocation();if(!point||!grid||!waveGrid||grid.validTime!==validAtFor(forecastHour)||waveGrid.validTime!==validAtFor(forecastHour))return;hourFrames.set(frameKey(forecastHour,point),{wind:grid,wave:waveGrid,at:Date.now()});if(hourFrames.size>24)hourFrames.delete(hourFrames.keys().next().value);if(hourFrames.size===1)setTimeout(preloadNearby,2000)}
+let preloading=false;
+async function preloadNearby(){if(preloading||hourFrames.size===0)return;preloading=true;const selected=forecastHour;const candidates=[6,12,24,18,36,48,72,0].filter(h=>h!==selected);for(const h of candidates.slice(0,3)){const p=encounterMode==='encounter'?positionAtHour(h):map.getCenter();if(!p)continue;const c={lat:p.lat,lng:p.lng??p.lon};if(hourFrames.has(frameKey(h,c)))continue;await Promise.allSettled([forecastData('wind',c,h),forecastData('wave',c,h)]);await new Promise(resolve=>setTimeout(resolve,500))}preloading=false}
 function restoreHourFrame(){const point=frameLocation();if(!point)return false;const entry=hourFrames.get(frameKey(forecastHour,point));if(!entry||Date.now()-entry.at>CACHE_TTL_MS)return false;grid=entry.wind;waveGrid=entry.wave;updateMarineCards();updateProjection();render();$('status').textContent='Cached NOAA forecast · instant frame';$('validTime').textContent='Valid: '+validAtFor(forecastHour);return true}
 
 function validAtFor(hour=forecastHour){return new Date(timelineBase.getTime()+hour*3600000).toISOString()}
