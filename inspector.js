@@ -3,9 +3,9 @@
 (()=>{
  const area=document.querySelector('#inspectorMount');if(!area||typeof map==='undefined')return;
  const card=document.createElement('section');card.id='weatherInspector';card.className='weather-inspector';card.hidden=true;
- card.innerHTML='<div class="wi-head"><strong>◎ WEATHER INSPECTOR</strong><button type="button" id="wiClose" title="Unpin inspector" aria-label="Unpin inspector">×</button></div><div id="wiLocation" class="wi-location"></div><div id="wiMetrics" class="wi-metrics"></div><div id="wiValid" class="wi-valid"></div>';
+ card.innerHTML='<div class="wi-head"><strong>◎ WEATHER INSPECTOR</strong></div><div id="wiLocation" class="wi-location"></div><div id="wiMetrics" class="wi-metrics"></div><div id="wiValid" class="wi-valid"></div>';
  area.appendChild(card);
- const close=card.querySelector('#wiClose');let pinned=null,last=null;
+ let last=null;
  const rad=Math.PI/180;
  const closest=(data,where)=>{
   if(!data?.points?.length||data.validTime!==validAtFor(forecastHour))return null;
@@ -20,7 +20,7 @@
   if(!point)return;
   last=point;const w=closest(grid,point),v=closest(waveGrid,point);
   card.hidden=false;
-  card.querySelector('#wiLocation').textContent=nauticalCoord(point.lat,true)+' · '+nauticalCoord(normalizeLon(point.lng),false)+(pinned?' · PINNED':'');
+  card.querySelector('#wiLocation').textContent=nauticalCoord(point.lat,true)+' · '+nauticalCoord(normalizeLon(point.lng),false);
   const from=w?((Math.atan2(-w.u,-w.v)*180/Math.PI+360)%360):NaN;
   card.querySelector('#wiMetrics').innerHTML=
    metric('WIND',w&&Number.isFinite(w.u)&&Number.isFinite(w.v)?val(Math.hypot(w.u,w.v)*1.943844)+' kt':'--',dir(from))+
@@ -29,15 +29,9 @@
    metric('PRIMARY SWELL',v&&Number.isFinite(v.swell)?val(v.swell*3.28084,1)+' ft':'--',v?(dir(v.swellDirection)+' · '+(Number.isFinite(v.swellPeriod)?val(v.swellPeriod)+' s':'--')):'--')+
    metric('PRESSURE',w&&Number.isFinite(w.mslp)?val(w.mslp)+' hPa':'--','Mean sea level');
   card.querySelector('#wiValid').textContent='NOAA GFS · +'+forecastHour+'h · '+validAtFor(forecastHour).slice(0,16).replace('T',' ')+' UTC · nearest 1° model sample';
-  card.classList.toggle('wi-pinned',!!pinned);
  }
- map.on('mousemove',e=>{if(!pinned)show(e.latlng)});
- map.on('mouseout',()=>{if(!pinned)card.hidden=true});
- map.on('click',e=>{pinned=e.latlng;show(pinned)});
- close.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();pinned=null;card.hidden=true});
- card.addEventListener('click',e=>e.stopPropagation());
- document.addEventListener('keydown',e=>{if(e.key==='Escape'&&pinned){pinned=null;card.hidden=true}});
- document.addEventListener('weather-hour-changed',()=>{if(pinned)show(pinned);else if(last&&!card.hidden)show(last)});
- document.addEventListener('weather-grid-updated',()=>{if(pinned)show(pinned);else if(last&&!card.hidden)show(last)});
- map.on('moveend',()=>{if(pinned)show(pinned)});
+ map.on('mousemove',e=>show(e.latlng));
+ map.on('mouseout',()=>{card.hidden=true});
+ document.addEventListener('weather-hour-changed',()=>{if(last&&!card.hidden)show(last)});
+ document.addEventListener('weather-grid-updated',()=>{if(last&&!card.hidden)show(last)});
 })();
