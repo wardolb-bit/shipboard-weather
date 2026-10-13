@@ -1,8 +1,9 @@
 'use strict';
 // Synoptic layers: NOAA GFS pressure, wind and NOAA GFS Wave model points only.
 (()=>{
- const flags={barbs:false,pressure:false,centers:false,waves:false,swell:false};
+ const flags={barbs:false,pressure:false,centers:false,waves:false,swell:false,fronts:false};
  const layers={};let schedule=null;
+ let frontRequest=0,frontCache=new Map();
  const remove=name=>{if(layers[name]){map.removeLayer(layers[name]);delete layers[name]}};
  const wrap=(x,ref)=>lonNear(x,ref);
  const valid=data=>data?.validTime===validAtFor(forecastHour)&&Array.isArray(data.points);
@@ -163,15 +164,96 @@
   }
   plot('swell',items)
  }
- function update(){clearTimeout(schedule);schedule=setTimeout(()=>{windBarbs();pressure();waveContours();centers();swell()},65)}
- function toggle(name){flags[name]=!flags[name];update()}
+ // WPC official fronts are primarily North American. Do not extrapolate them to the Pacific.
+ const frontCoverage={west:-150.6,east:-2.2,south:10,north:91};
+ const frontStyles={
+  cold:{color:'#368af9',label:'Cold front'},
+  warm:{color:'#fc666a',label:'Warm front'},
+  stationary:{color:'#4aa1f6',label:'Stationary front'},
+  occluded:{color:'#b17cf1',label:'Occluded front'},
+  trough:{color:'#bf9367',label:'Trough'}
+ };
+ function frontType(feat){
+  const value=String(feat.properties?.feat||'').toLowerCase();
+  if(value.includes('cold'))return 'cold';
+  if(value.includes('warm'))return 'warm';
+  if(value.includes('stationary'))return 'stationary';
+  if(value.includes('occluded'))return 'occluded';
+  if(value.includes('trough'))return 'trough';
+  return null;
+ }
+ function wpcDay(hour){return hour<=24?1:hour<=48?2:3}
+ function frontLabel(text){
+  let el=document.getElementById('frontStatus');
+  if(!el){el=document.createElement('div');el.id='frontStatus';el.className='muted';el.style.cssText='position:absolute;left:12px;top:12px;z-index:460;max-width:275px;padding:7px 10px;background:#102b3fee;border:1px solid #466a7f;border-radius:7px;pointer-events:none;font-size:11px';document.querySelector('.maparea').appendChild(el)}
+  el.hidden=!flags.fronts;if(flags.fronts)el.textContent=text
+ }
+ function drawFronts(data,day){
+  const lines=[];
+  for(const feature of data.features){
+   const type=frontType(feature);if(!type)continue;
+   const segments=feature.geometry.type==='LineString'?[feature.geometry.coordinates]:feature.geometry.coordinates;
+   for(const coords of segments){
+    if(!Array.isArray(coords)||coords.length<2)continue;
+    const path=coords.filter(p=>Array.isArray(p)&&Number.isFinite(p[0])&&Number.isFinite(p[1])).map(p=>[p[1],lonNear(p[0],map.getCenter().lng)]);
+    if(path.length<2)continue;
+    const style=frontStyles[type];
+    lines.push(L.polyline(path,{color:style.color,weight:3,opacity:.94,dashArray:type==='trough'?'8 6':undefined,interactive:false}));
+    // NOAA supplied geometry/type, chart glyphs along the same paths (not inferred fronts).
+    if(type==='trough')continue;
+    const distance=path.reduce((n,p,i)=>i?n+map.distance(path[i-1],p):n,0);
+    const count=Math.min(35,Math.floor(distance/220000));
+    if(!count)continue;
+    const pixelLength=path.reduce((n,p,i)=>i?n+map.latLngToLayerPoint(path[i-1]).distanceTo(map.latLngToLayerPoint(p)):n,0);
+    if(pixelLength<80)continue;
+    for(let k=1;k<=count;k++){
+     const fraction=k/(count+1),goal=distance*fraction;
+     let travelled=0;
+     for(let i=1;i<path.length;i++){
+      const d=map.distance(path[i-1],path[i]);if(travelled+d<goal){travelled+=d;continue}
+      const t=d?(goal-travelled)/d:0;
+      const la=path[i-1][0]+(path[i][0]-path[i-1][0])*t,lo=path[i-1][1]+(path[i][1]-path[i-1][1])*t;
+      const dir=Math.atan2(path[i][1]-path[i-1][1],path[i][0]-path[i-1][0])*180/Math.PI;
+      const cold=type==='cold'||(type==='stationary'&&k%2===0)||(type==='occluded'&&k%2===0);
+      const glyph=cold?'▲':'●',c=type==='stationary'?(cold?'#368af9':'#fc666a'):style.color;
+      lines.push(L.marker([la,lo],{interactive:false,icon:L.divIcon({className:'',iconSize:[13,13],iconAnchor:[6,6],html:'<div style="color:'+c+';font-size:14px;line-height:13px;text-shadow:0 0 2px #001;transform:rotate('+dir+'deg)">'+glyph+'</div>'})}));
+      break;
+     }
+    }
+   }
+  }
+  plot('fronts',lines);
+ }
+ async function fronts(){
+  if(!flags.fronts){remove('fronts');frontLabel('');return}
+  const center=map.getCenter(),longitude=normalizeLon(center.lng);
+  if(longitude<frontCoverage.west||longitude>frontCoverage.east||center.lat<frontCoverage.south||center.lat>frontCoverage.north){
+   remove('fronts');frontLabel('NOAA WPC fronts · no official coverage at this map location');return
+  }
+  const day=wpcDay(forecastHour),cached=frontCache.get(day);
+  if(cached&&Date.now()-cached.at<900000){
+   drawFronts(cached.data,day);frontLabel('NOAA WPC Day '+day+' frontal forecast · NOT valid for exact GFS hour');return
+  }
+  const token=++frontRequest;
+  frontLabel('Loading official NOAA WPC Day '+day+' frontal boundaries…');
+  try{
+   const response=await fetch('/api/fronts?day='+day),data=await response.json();
+   if(!response.ok)throw Error(data.error||'NOAA fronts unavailable');
+   if(token!==frontRequest||!flags.fronts)return;
+   frontCache.set(day,{data,at:Date.now()});drawFronts(data,day);
+   const date=data.features.map(f=>f.properties?.idp_filedate).filter(Number.isFinite).sort((a,b)=>b-a)[0];
+   frontLabel('NOAA WPC Day '+day+' frontal forecast'+(date?' · data '+new Date(date).toISOString().slice(0,16)+'Z':'')+' · NOT exact GFS valid time');
+  }catch(error){if(token!==frontRequest)return;remove('fronts');frontLabel('NOAA frontal data unavailable · '+String(error.message).slice(0,75))}
+ }
+ function update(){clearTimeout(schedule);schedule=setTimeout(()=>{windBarbs();pressure();waveContours();centers();swell();fronts()},65)}
+ function toggle(name){flags[name]=!flags[name];if(name==='fronts')frontRequest++;update()}
  function preset(name){
-  const next=name==='synoptic'?{barbs:true,pressure:true,centers:true,waves:false,swell:false}:name==='clean'?{barbs:false,pressure:false,centers:false,waves:false,swell:false}:{barbs:false,pressure:false,centers:false,waves:false,swell:false};
+  const next=name==='synoptic'?{barbs:true,pressure:true,centers:true,waves:false,swell:false,fronts:flags.fronts}:name==='clean'?{barbs:false,pressure:false,centers:false,waves:false,swell:false,fronts:false}:{barbs:false,pressure:false,centers:false,waves:false,swell:false,fronts:flags.fronts};
   Object.assign(flags,next);
   if(name==='clean'){windOn=false;clearLayers()}else {windOn=true;selectMode(name==='marine'?'wind':'wind')}
   update()
  }
- function frontsInfo(){$('status').textContent='Official frontal boundaries are not available from the NOAA GFS field feed. No synthetic fronts drawn.'}
+ function frontsInfo(){flags.fronts=!flags.fronts;frontRequest++;update()}
  map.on('zoomend moveend',update);
  window.synoptic={flags,update,toggle,preset,frontsInfo};
 })();
