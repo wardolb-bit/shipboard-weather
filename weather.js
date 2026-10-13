@@ -257,7 +257,7 @@ if(window.L){map=L.map('map',{worldCopyJump:true}).setView([lat,lon],5);L.tileLa
 function nearestToVessel(data){if(!data?.points?.length)return null;const pos=positionAtHour(forecastHour);if(!pos)return null;const {lat:sampleLat,lon:sampleLon}=pos;let best=null,d=Infinity;for(const p of data.points){const distance=Math.abs(p.lat-sampleLat)+longitudeDelta(p.lon,sampleLon)*Math.cos(sampleLat*Math.PI/180);if(distance<d){d=distance;best=p}}return d<3?best:null}
 function updateMarineCards(){
  const pos=positionAtHour(forecastHour)||{lat,lon};const sampleLat=pos.lat,sampleLon=pos.lon;
- const w=grid?.shipSample&&Math.abs(grid.shipSample.lat-sampleLat)<0.15&&longitudeDelta(grid.shipSample.lon,sampleLon)<0.15?grid.shipSample:nearestToVessel(grid),sea=nearestToVessel(waveGrid);
+ const w=grid?.shipSample&&Math.abs(grid.shipSample.lat-sampleLat)<0.15&&longitudeDelta(grid.shipSample.lon,sampleLon)<0.15?grid.shipSample:nearestToVessel(grid),sea=nearestToVessel(waveGrid)||vesselWaveSample;
  $('gustValue').textContent=w&&Number.isFinite(w.gust)?(w.gust*1.943844).toFixed(0)+' kt':'--';
  $('gustInfo').textContent=w&&Number.isFinite(w.gust)?'NOAA GFS surface gust':'No NOAA gust value available';
  $('waveValue').textContent=sea&&Number.isFinite(sea.height)?(sea.height*3.28084).toFixed(1)+' ft':'--';
@@ -282,8 +282,18 @@ ctx.putImageData(pixels,0,0);imageUrl=canvas.toDataURL('image/png');const prior=
 gradient=L.imageOverlay(imageUrl,[[south,west+worldShift],[north,east+worldShift]],{interactive:false,opacity:.85}).addTo(map);
 if(arrowsOn&&mode==='wind'){arrows=L.layerGroup();const marks=[];for(const p of pts){const pixel=map.latLngToContainerPoint([p.lat,p.lon+worldShift]),size=map.getSize();if(pixel.x<0||pixel.y<0||pixel.x>size.x||pixel.y>size.y||marks.some(q=>Math.hypot(q.x-pixel.x,q.y-pixel.y)<70))continue;marks.push(pixel);const angle=Math.atan2(p.u,p.v)*180/Math.PI;const icon=L.divIcon({className:'',iconSize:[24,24],iconAnchor:[12,12],html:'<svg width="24" height="24" viewBox="0 0 24 24" style="transform:rotate('+angle+'deg);filter:drop-shadow(0 1px 2px #00131b)"><path d="M12 3 L12 20 M6 10 L12 3 L18 10" fill="none" stroke="#f3faff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'});L.marker([p.lat,p.lon+worldShift],{icon,interactive:false,keyboard:false}).addTo(arrows)}arrows.addTo(map)}
 sampleAtShip()}
-let lastWaveRequestPosition=null,lastWindRequestPosition=null;
-function updateShip(a,b,cog,sog){if(!Number.isFinite(a)||!Number.isFinite(b)||Math.abs(a)>90||Math.abs(b)>180)return;lat=a;lon=b;if(Number.isFinite(Number(cog))&&cog!==null&&cog!==''&&Number(cog)>=0&&Number(cog)<360)liveCog=Number(cog);if(Number.isFinite(Number(sog))&&sog!==null&&sog!==''&&Number(sog)>=0&&Number(sog)<=60)liveSog=Number(sog);ship?.setLatLng([a,b]);const angle=Number(cog);if(cog!==null&&cog!==undefined&&cog!==''&&Number.isFinite(angle)&&angle>=0&&angle<360){const svg=ship?.getElement()?.querySelector('svg');if(svg)svg.style.transform='rotate('+angle+'deg)'}$('positionText').textContent=nauticalCoord(a,true)+'  '+nauticalCoord(b,false);if(comparing)drawComparison();updateProjection();sampleAtShip();updateHud();if(encounterMode==='encounter'&&forecastHour>0){const p=positionAtHour(forecastHour);if(p&&(!nearestToVessel(grid)||!nearestToVessel(waveGrid))){refresh(p.lat,p.lon,true);loadWave(p.lat,p.lon)}return}if(!nearestToVessel(grid)||grid?.forecastHour!==forecastHour){const d=lastWindRequestPosition;if(!d||Math.abs(a-d.lat)>2||longitudeDelta(b,d.lon)>2){lastWindRequestPosition={lat:a,lon:b};refresh(a,b,true)}}if(waveGrid?.forecastHour!==forecastHour||!nearestToVessel(waveGrid)){const d=lastWaveRequestPosition;if(!d||Math.abs(a-d.lat)>2||Math.abs(b-d.lon)>2){lastWaveRequestPosition={lat:a,lon:b};loadWave(a,b)}}}
+let lastWaveRequestPosition=null,lastWindRequestPosition=null,vesselWaveSample=null,vesselWavePending=false,vesselWaveAt=0;
+async function loadVesselWave(){
+ const p=positionAtHour(forecastHour);if(!p||vesselWavePending||Date.now()-vesselWaveAt<60000)return;
+ vesselWavePending=true;const h=forecastHour;
+ try{const data=await forecastData('wave',{lat:p.lat,lng:p.lon},h);
+  if(h!==forecastHour)return;
+  const sample=data.shipSample||data.points.reduce((best,x)=>{const d=Math.abs(x.lat-p.lat)+longitudeDelta(x.lon,p.lon);return d<best.d?{point:x,d}:best},{point:null,d:Infinity}).point;
+  if(sample&&Number.isFinite(sample.height)){vesselWaveSample=sample;vesselWaveAt=Date.now();updateMarineCards()}
+ }catch(e){$('waveInfo').textContent='NOAA wave sample unavailable · retry pending';vesselWaveAt=Date.now()-45000}
+ finally{vesselWavePending=false}
+}
+function updateShip(a,b,cog,sog){if(!Number.isFinite(a)||!Number.isFinite(b)||Math.abs(a)>90||Math.abs(b)>180)return;lat=a;lon=b;if(Number.isFinite(Number(cog))&&cog!==null&&cog!==''&&Number(cog)>=0&&Number(cog)<360)liveCog=Number(cog);if(Number.isFinite(Number(sog))&&sog!==null&&sog!==''&&Number(sog)>=0&&Number(sog)<=60)liveSog=Number(sog);ship?.setLatLng([a,b]);const angle=Number(cog);if(cog!==null&&cog!==undefined&&cog!==''&&Number.isFinite(angle)&&angle>=0&&angle<360){const svg=ship?.getElement()?.querySelector('svg');if(svg)svg.style.transform='rotate('+angle+'deg)'}$('positionText').textContent=nauticalCoord(a,true)+'  '+nauticalCoord(b,false);if(comparing)drawComparison();updateProjection();sampleAtShip();updateHud();if(encounterMode==='encounter'&&forecastHour>0){const p=positionAtHour(forecastHour);if(p&&(!nearestToVessel(grid)||!nearestToVessel(waveGrid))){refresh(p.lat,p.lon,false);loadVesselWave()}return}if(!nearestToVessel(grid)||grid?.forecastHour!==forecastHour){const d=lastWindRequestPosition;if(!d||Math.abs(a-d.lat)>2||longitudeDelta(b,d.lon)>2){lastWindRequestPosition={lat:a,lon:b};refresh(a,b,false)}}if(waveGrid?.forecastHour!==forecastHour||!nearestToVessel(waveGrid)){const d=lastWaveRequestPosition;if(!d||Math.abs(a-d.lat)>2||Math.abs(b-d.lon)>2){lastWaveRequestPosition={lat:a,lon:b};loadVesselWave()}}}
 // Keep AIS ownship feed alive across brief shipboard network interruptions.
 let bridgeRetries=0,bridgeRetryTimer=null,bridgeHeartbeat=null,lastOwnshipAt=0;
 function updateHud(){const cog=$('hudCog'),sog=$('hudSog'),feed=$('hudFeed');if(!cog)return;cog.textContent=Number.isFinite(liveCog)?Math.round(liveCog).toString().padStart(3,'0')+'°':'--';sog.textContent=Number.isFinite(liveSog)?liveSog.toFixed(1)+' kt':'--';const connected=ws?.readyState===WebSocket.OPEN;const fresh=connected&&lastOwnshipAt>0&&Date.now()-lastOwnshipAt<90000;
@@ -341,8 +351,8 @@ async function loadWave(targetLat=positionAtHour(forecastHour)?.lat??lat,targetL
   const data=await forecastViewport('wave',forecastHour);
   if(request!==waveRequest)return;
   
-  waveGrid=data;saveHourFrame();updateMarineCards();window.synoptic?.update();if(mode==='wave'){render();$('status').textContent='NOAA GFS Wave · significant combined seas';$('validTime').textContent='Valid: '+data.validTime}
- }catch(e){if(request!==waveRequest)return;$('status').textContent='NOAA GFS Wave unavailable · '+String(e.message).slice(0,72);$('waveInfo').textContent='Wave request failed';$('swellInfo').textContent='Wave request failed';if(mode==='wave'){clearLayers();$('info').textContent='No wave colors shown: '+e.message}}
+  waveGrid=data;saveHourFrame();updateMarineCards();if(!nearestToVessel(waveGrid))loadVesselWave();window.synoptic?.update();if(mode==='wave'){render();$('status').textContent='NOAA GFS Wave · significant combined seas';$('validTime').textContent='Valid: '+data.validTime}
+ }catch(e){if(request!==waveRequest)return;$('status').textContent='NOAA GFS Wave unavailable · '+String(e.message).slice(0,72);$('waveInfo').textContent='Wave request failed';$('swellInfo').textContent='Wave request failed';if(mode==='wave'){clearLayers();$('info').textContent='No wave colors shown: '+e.message}loadVesselWave()}
 }
 function selectMode(next){mode=next;updateLegend();for(const key of ['wind','gust','wave']){$(key==='wind'?'windBtn':key==='gust'?'gustBtn':'waveBtn').style.opacity=key===mode?'1':'.55'}
  if(mode==='wave'&&(!waveGrid||waveGrid.forecastHour!==forecastHour)){clearLayers();loadWave(map.getCenter().lat,map.getCenter().lng);return}
@@ -403,7 +413,7 @@ document.addEventListener('keydown',event=>{if(event.key==='Escape')closeContext
 
 
 for(const h of [0,6,12,18,24,36,48,72]){const b=document.createElement('button');b.textContent='+'+h+'h · '+forecastLabel(h);b.title=validAtFor(h);b.dataset.hour=String(h);b.onclick=()=>{
- if(forecastHour===h)return;forecastHour=h;updateHud();sequence++;waveRequest++;clearTimeout(debounce);const instant=restoreHourFrame();if(!instant){$('status').textContent='Loading NOAA forecast · retaining previous map until ready';$('wind').textContent='--';$('direction').textContent='Loading NOAA forecast'};
+ if(forecastHour===h)return;forecastHour=h;vesselWaveSample=null;vesselWaveAt=0;updateHud();sequence++;waveRequest++;clearTimeout(debounce);const instant=restoreHourFrame();if(!instant){$('status').textContent='Loading NOAA forecast · retaining previous map until ready';$('wind').textContent='--';$('direction').textContent='Loading NOAA forecast'};
  $('timeStatus').textContent='Selected '+forecastLabel(h)+' · retrieving NOAA wind and waves';
  $('forecastScrubber').value=[...$('steps').children].indexOf(b);$('playbackValid').textContent='+'+h+'h';for(const btn of $('steps').children)btn.classList.toggle('selected',btn===b);
  if(!instant)reloadEncounter();else {updateProjection();if(!insideGrid()||grid?.viewportIncomplete)refresh();}if(comparing)refreshComparison();window.vesselAdvisories?.update();window.synoptic?.update();document.dispatchEvent(new CustomEvent('weather-hour-changed',{detail:{hour:h}}));
