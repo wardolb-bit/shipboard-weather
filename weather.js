@@ -37,7 +37,7 @@ function positionAtHour(hours){
 function updateProjection(){
  if(projected){map.removeLayer(projected);projected=null}if(projectedTrack){map.removeLayer(projectedTrack);projectedTrack=null}
  const p=positionAtHour(forecastHour),enabled=encounterMode==='encounter';
- $('encounterControls').style.display=enabled?'inline':'none';
+ $('encounterControls').style.display=enabled?'inline-flex':'none';$('chartControls').hidden=!(enabled&&!comparing);
  $('timeStatus').textContent='Selected '+forecastLabel(forecastHour)+(enabled?(p?' · predicted '+nauticalCoord(p.lat,true)+' '+nauticalCoord(p.lon,false):' · enter valid COG / SOG to project'):' · fixed vessel position');
  if(!enabled||!p||!map||!forecastHour)return p;
  const locations=[];for(let i=0;i<=24;i++){const step=forecastHour*i/24,q=positionAtHour(step);if(q)locations.push([q.lat,lonNear(q.lon,lon)])}
@@ -116,7 +116,7 @@ async function refreshComparison(){
 function setComparison(enabled){
  comparing=enabled;compareSequence++;
  $('comparePanel').hidden=!enabled;$('compareResults').hidden=!enabled;$('singleWeather').style.display=enabled?'none':'';
- $('compareBtn').classList.toggle('active',enabled);
+ $('compareBtn').classList.toggle('active',enabled);$('chartControls').hidden=enabled||encounterMode!=='encounter';
  if(enabled){$('compareValid').textContent=validAtFor(forecastHour);drawComparison();refreshComparison()}
  else clearComparisonMap();
 }
@@ -202,10 +202,10 @@ function showContextMenu(event){
  item('Wind direction: '+(arrowsOn?'ON':'OFF'),()=>$('directionBtn').click());
  item('Weather overlay: '+(windOn?'ON':'OFF'),()=>$('windBtn').click());
  separator();heading('FORECAST TOOLS');
- item('Fixed position',()=>{$('encounterMode').value='fixed';$('encounterMode').dispatchEvent(new Event('change'));$('chartControls').hidden=true});
- item('Vessel encounter',()=>{$('encounterMode').value='encounter';$('encounterMode').dispatchEvent(new Event('change'));$('chartControls').hidden=false});
+ item('Fixed position',()=>{if(comparing)setComparison(false);$('encounterMode').value='fixed';$('encounterMode').dispatchEvent(new Event('change'))});
+ item('Vessel encounter',()=>{if(comparing)setComparison(false);$('encounterMode').value='encounter';$('encounterMode').dispatchEvent(new Event('change'))});
  item((comparing?'✓ ':'')+'Compare courses',()=>$('compareBtn').click());
- item('Course / speed settings',()=>$('chartControls').hidden=false);
+ item('Course / speed settings',()=>{if(comparing)setComparison(false);$('encounterMode').value='encounter';$('encounterMode').dispatchEvent(new Event('change'));$('manualMotion').checked=true;$('manualMotion').dispatchEvent(new Event('change'))});
  separator();heading('MAP & DATA');
  item('Center on vessel',()=>$('center').click());
  item('Refresh forecast',()=>{const p=positionAtHour(forecastHour);if(p){refresh(p.lat,p.lon,true);loadWave(p.lat,p.lon)}});
@@ -219,8 +219,8 @@ function showContextMenu(event){
 $('map').addEventListener('contextmenu',showContextMenu);
 document.querySelector('.maparea').addEventListener('contextmenu',event=>{if(event.target.closest('#contextMenu, #chartControls, #comparePanel, #drawer'))return;showContextMenu(event)});
 document.addEventListener('pointerdown',event=>{if(!event.target.closest('#contextMenu'))closeContextMenu()});
-document.addEventListener('keydown',event=>{if(event.key==='Escape'){closeContextMenu();$('chartControls').hidden=true}});
-$('closeChartControls').onclick=()=>$('chartControls').hidden=true;
+document.addEventListener('keydown',event=>{if(event.key==='Escape')closeContextMenu()});
+
 
 for(const h of [0,6,12,18,24,36,48,72]){const b=document.createElement('button');b.textContent='+'+h+'h · '+forecastLabel(h);b.title=validAtFor(h);b.dataset.hour=String(h);b.onclick=()=>{
  if(forecastHour===h)return;forecastHour=h;sequence++;waveRequest++;grid=null;waveGrid=null;clearLayers();updateMarineCards();$('wind').textContent='--';$('direction').textContent='Loading NOAA forecast';
