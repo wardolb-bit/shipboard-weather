@@ -111,18 +111,76 @@ async function refreshComparison(){
   if(request!==compareSequence||!comparing)return;
   if(w.status==='fulfilled'){
    const wind=w.value.shipSample||compareClosest(w.value,pos);
-   if(wind){$('comp'+letter+'wind').textContent=speed(wind).toFixed(0)+' kt';$('comp'+letter+'gust').textContent=Number.isFinite(wind.gust)?(wind.gust*1.943844).toFixed(0)+' kt':'--';$('comp'+letter+'dir').textContent=Math.round((Math.atan2(-wind.u,-wind.v)*180/Math.PI+360)%360)+'°'}
+   if(wind){$('comp'+letter+'wind').textContent=speed(wind).toFixed(0)+' kt';$('comp'+letter+'gust').textContent=Number.isFinite(wind.gust)?(wind.gust*1.943844).toFixed(0)+' kt':'--';$('comp'+letter+'dir').textContent=Math.round((Math.atan2(-wind.u,-wind.v)*180/Math.PI+360)%360)+'° · '+bearingSector((Math.atan2(-wind.u,-wind.v)*180/Math.PI+360)%360,motion.course)}
   }
   if(sea.status==='fulfilled'){
    const p=compareClosest(sea.value,pos);
-   if(p){$('comp'+letter+'sea').textContent=Number.isFinite(p.height)?(p.height*3.28084).toFixed(1)+' ft':'--';$('comp'+letter+'swell').textContent=Number.isFinite(p.swell)?(p.swell*3.28084).toFixed(1)+' ft':'--';$('comp'+letter+'waveDir').textContent=Number.isFinite(p.direction)?Math.round(p.direction)+'°':'--'}
+   if(p){$('comp'+letter+'sea').textContent=Number.isFinite(p.height)?(p.height*3.28084).toFixed(1)+' ft':'--';$('comp'+letter+'swell').textContent=Number.isFinite(p.swell)?(p.swell*3.28084).toFixed(1)+' ft':'--';$('comp'+letter+'waveDir').textContent=Number.isFinite(p.direction)?Math.round(p.direction)+'° · '+bearingSector(p.direction,motion.course):'--'}
   }
   if(w.status==='rejected'||sea.status==='rejected')$('compareStatus').textContent='Partial NOAA coverage; unavailable fields shown as --.';
  }));
  if(request===compareSequence&&$('compareStatus').textContent.startsWith('Retrieving'))$('compareStatus').textContent='NOAA forecast sampled at both projected positions.';
 }
+// Along-track samples use each forecast hour's own location and NOAA valid time.
+let analysisRun=0;
+function bearingSector(direction,course){
+ if(!Number.isFinite(direction))return '--';
+ const relative=((direction-course+540)%360)-180,angle=Math.abs(relative);
+ const side=relative<0?'port':'starboard';
+ if(angle<=22.5)return 'Head';
+ if(angle<=67.5)return 'Bow '+side;
+ if(angle<=112.5)return 'Beam '+side;
+ if(angle<=157.5)return 'Quarter '+side;
+ return 'Following';
+}
+function trackSample(wave,wind,motion){
+ const from=wind&&Number.isFinite(wind.u)&&Number.isFinite(wind.v)?(Math.atan2(-wind.u,-wind.v)*180/Math.PI+360)%360:NaN;
+ return {wind:wind?speed(wind):NaN,gust:Number.isFinite(wind?.gust)?wind.gust*1.943844:NaN,sea:Number.isFinite(wave?.height)?wave.height*3.28084:NaN,swell:Number.isFinite(wave?.swell)?wave.swell*3.28084:NaN,windSector:bearingSector(from,motion.course),seaSector:bearingSector(wave?.direction,motion.course),windFrom:from};
+}
+async function analyzeTracks(){
+ const token=++analysisRun,motions=[compareInputs(0),compareInputs(1)];
+ if(motions.some(x=>!x)){$('analysisStatus').textContent='Enter valid course and speed for both tracks.';return}
+ const hours=[0,6,12,18,24,36,48,72],records=[[],[]];
+ $('analysisResults').replaceChildren();$('analysisStatus').textContent='Sampling NOAA wind and waves along both projected tracks…';
+ const jobs=hours.flatMap(hour=>motions.map((motion,i)=>({hour,motion,i})));
+ let done=0;
+ async function worker(){
+  while(jobs.length&&token===analysisRun&&comparing){
+   const {hour,motion,i}=jobs.shift(),pos=projectedCoursePosition(hour,motion),c={lat:pos.lat,lng:pos.lon};
+   const [w,a]=await Promise.allSettled([forecastData('wind',c,hour),forecastData('wave',c,hour)]);
+   if(token!==analysisRun||!comparing)return;
+   const wind=w.status==='fulfilled'?(w.value.shipSample||compareClosest(w.value,pos)):null;
+   const sea=a.status==='fulfilled'?compareClosest(a.value,pos):null;
+   records[i].push({hour,...trackSample(sea,wind,motion)});
+   $('analysisStatus').textContent='Sampling NOAA forecasts: '+(++done)+' / 16';
+  }
+ }
+ await Promise.all([worker(),worker()]);
+ if(token!==analysisRun||!comparing)return;
+ const numbers=(list,key)=>list.map(x=>x[key]).filter(Number.isFinite);
+ const maximum=(list,key,unit)=>{const vals=numbers(list,key);return vals.length?Math.max(...vals).toFixed(key==='sea'||key==='swell'?1:0)+' '+unit:'--'};
+ const table=document.createElement('table');
+ table.innerHTML='<thead><tr><th>MAXIMUM</th><th>COURSE A</th><th>COURSE B</th></tr></thead><tbody>'+
+ [['Wind','wind','kt'],['Gusts','gust','kt'],['Seas','sea','ft'],['Swell','swell','ft']].map(([label,key,unit])=>'<tr><td>'+label+'</td><td>'+maximum(records[0],key,unit)+'</td><td>'+maximum(records[1],key,unit)+'</td></tr>').join('')+'</tbody>';
+ $('analysisResults').appendChild(table);
+ const detail=document.createElement('table');detail.innerHTML='<thead><tr><th>UTC +H</th><th>A SEAS</th><th>B SEAS</th></tr></thead><tbody>'+hours.map(hour=>'<tr><td>+'+hour+'h</td>'+[0,1].map(i=>{const p=records[i].find(x=>x.hour===hour);return '<td>'+(Number.isFinite(p?.sea)?p.sea.toFixed(1)+' ft':'--')+'</td>'}).join('')+'</tr>').join('')+'</tbody>';
+ $('analysisResults').appendChild(detail);
+ $('analysisStatus').textContent='NOAA model samples across 0–72h · missing data shown as --';
+}
+$('analyzeTracks').onclick=analyzeTracks;
+let animationTimer=null;
+function stopAnimation(){if(animationTimer){clearInterval(animationTimer);animationTimer=null}$('playForecast').textContent='▶ PLAY'}
+function toggleAnimation(){
+ if(animationTimer){stopAnimation();return}
+ $('playForecast').textContent='❚❚ PAUSE';
+ animationTimer=setInterval(()=>{
+  const buttons=[...$('steps').children],idx=buttons.findIndex(b=>Number(b.dataset.hour)===forecastHour);
+  buttons[(idx+1)%buttons.length].click();
+ },1500);
+}
+$('playForecast').onclick=toggleAnimation;
 function setComparison(enabled){
- comparing=enabled;compareSequence++;
+ comparing=enabled;compareSequence++;if(!enabled)analysisRun++;
  $('comparePanel').hidden=!enabled;$('compareResults').hidden=!enabled;$('singleWeather').style.display=enabled?'none':'';
  $('compareBtn').classList.toggle('active',enabled);$('chartControls').hidden=enabled||encounterMode!=='encounter';
  if(enabled){$('compareValid').textContent=validAtFor(forecastHour);drawComparison();refreshComparison()}
