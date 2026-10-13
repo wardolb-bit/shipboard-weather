@@ -234,7 +234,47 @@ if(arrowsOn&&mode==='wind'){arrows=L.layerGroup();const marks=[];for(const p of 
 sampleAtShip()}
 let lastWaveRequestPosition=null,lastWindRequestPosition=null;
 function updateShip(a,b,cog,sog){if(!Number.isFinite(a)||!Number.isFinite(b)||Math.abs(a)>90||Math.abs(b)>180)return;lat=a;lon=b;if(Number.isFinite(Number(cog))&&cog!==null&&cog!==''&&Number(cog)>=0&&Number(cog)<360)liveCog=Number(cog);if(Number.isFinite(Number(sog))&&sog!==null&&sog!==''&&Number(sog)>=0&&Number(sog)<=60)liveSog=Number(sog);ship?.setLatLng([a,b]);const angle=Number(cog);if(cog!==null&&cog!==undefined&&cog!==''&&Number.isFinite(angle)&&angle>=0&&angle<360){const svg=ship?.getElement()?.querySelector('svg');if(svg)svg.style.transform='rotate('+angle+'deg)'}$('positionText').textContent=nauticalCoord(a,true)+'  '+nauticalCoord(b,false);if(comparing)drawComparison();updateProjection();sampleAtShip();if(encounterMode==='encounter'&&forecastHour>0){const p=positionAtHour(forecastHour);if(p&&(!nearestToVessel(grid)||!nearestToVessel(waveGrid))){refresh(p.lat,p.lon,true);loadWave(p.lat,p.lon)}return}if(!nearestToVessel(grid)||grid?.forecastHour!==forecastHour){const d=lastWindRequestPosition;if(!d||Math.abs(a-d.lat)>2||longitudeDelta(b,d.lon)>2){lastWindRequestPosition={lat:a,lon:b};refresh(a,b,true)}}if(waveGrid?.forecastHour!==forecastHour||!nearestToVessel(waveGrid)){const d=lastWaveRequestPosition;if(!d||Math.abs(a-d.lat)>2||Math.abs(b-d.lon)>2){lastWaveRequestPosition={lat:a,lon:b};loadWave(a,b)}}}
-try{ws=new WebSocket('wss://ais.wardlab.dev');ws.onopen=()=>$('bridge').textContent='BRIDGE CONNECTED';ws.onclose=()=>$('bridge').textContent='BRIDGE OFFLINE';ws.onerror=()=>$('bridge').textContent='BRIDGE UNAVAILABLE';ws.onmessage=e=>{try{const v=JSON.parse(e.data);if(v.source==='AIVDO'||v.type==='ownship')updateShip(Number(v.lat??v.latitude),Number(v.lon??v.longitude),v.cog??v.courseOverGround??v.course_over_ground??v.course,v.sog??v.speedOverGround??v.speed_over_ground??v.speed)}catch{}}}catch{$('bridge').textContent='BRIDGE UNAVAILABLE'}
+// Keep AIS ownship feed alive across brief shipboard network interruptions.
+let bridgeRetries=0,bridgeRetryTimer=null,bridgeHeartbeat=null;
+function connectBridge(){
+ if(bridgeRetryTimer){clearTimeout(bridgeRetryTimer);bridgeRetryTimer=null}
+ $('bridge').textContent=bridgeRetries?'BRIDGE RECONNECTING':'BRIDGE CONNECTING';
+ let socket;
+ try{socket=new WebSocket('wss://ais.wardlab.dev')}
+ catch(error){scheduleBridgeReconnect();return}
+ ws=socket;
+ const connectingTimeout=setTimeout(()=>{if(socket.readyState===WebSocket.CONNECTING)socket.close()},12000);
+ socket.onopen=()=>{
+  clearTimeout(connectingTimeout);
+  if(ws!==socket)return;
+  bridgeRetries=0;$('bridge').textContent='BRIDGE CONNECTED';
+ };
+ socket.onmessage=e=>{
+  if(ws!==socket)return;
+  try{
+   const v=JSON.parse(e.data);
+   if(v.source==='AIVDO'||v.type==='ownship')updateShip(Number(v.lat??v.latitude),Number(v.lon??v.longitude),v.cog??v.courseOverGround??v.course_over_ground??v.course,v.sog??v.speedOverGround??v.speed_over_ground??v.speed);
+  }catch(error){console.warn('AIS message parsing failed',error)}
+ };
+ socket.onerror=()=>{if(ws===socket)$('bridge').textContent='BRIDGE CONNECTION ERROR'};
+ socket.onclose=()=>{
+  clearTimeout(connectingTimeout);
+  if(ws!==socket)return;
+  $('bridge').textContent='BRIDGE OFFLINE · RETRYING';scheduleBridgeReconnect();
+ };
+}
+function scheduleBridgeReconnect(){
+ if(bridgeRetryTimer)return;
+ const delay=Math.min(30000,1500*Math.pow(1.7,Math.min(bridgeRetries++,6)));
+ bridgeRetryTimer=setTimeout(()=>{bridgeRetryTimer=null;connectBridge()},delay);
+}
+document.addEventListener('visibilitychange',()=>{
+ if(document.visibilityState==='visible'&&(!ws||ws.readyState===WebSocket.CLOSED)){
+  if(bridgeRetryTimer){clearTimeout(bridgeRetryTimer);bridgeRetryTimer=null}
+  connectBridge();
+ }
+});
+connectBridge();
 function insideGrid(){if(grid?.forecastHour!==forecastHour||!grid?.points?.length)return false;const b=map.getBounds(),p=grid.points;const n=Math.max(...p.map(x=>x.lat)),s=Math.min(...p.map(x=>x.lat)),w=Math.min(...p.map(x=>x.lon)),e=Math.max(...p.map(x=>x.lon));const shifted=360*Math.round(((w+e)/2-b.getCenter().lng)/360);return b.getNorth()<n-2&&b.getSouth()>s+2&&b.getWest()+shifted>w+2&&b.getEast()+shifted<e-2}function refresh(targetLat=null,targetLon=null,force=false){if(!map||!windOn)return;if(!force&&encounterMode==='fixed'&&insideGrid()){render();$('status').textContent='NOAA GFS · using loaded forecast grid';return}clearTimeout(debounce);debounce=setTimeout(async()=>{const request=++sequence,c=force?{lat:targetLat,lng:targetLon}:(encounterMode==='encounter'?(()=>{const p=positionAtHour(forecastHour);return p?{lat:p.lat,lng:p.lon}:map.getCenter()})():map.getCenter());$('status').textContent='Refreshing NOAA GFS wind…';try{const data=await forecastData('wind',c,forecastHour);if(request!==sequence)return;const previous=grid;grid=data;saveHourFrame();updateMarineCards();sampleAtShip();try{render()}catch(e){grid=previous;render();throw e}$('validTime').textContent='Valid: '+data.validTime+' · Run '+data.modelRun+' · f'+String(data.modelForecastHour).padStart(3,'0')+' · sample '+(data.shipSample?data.shipSample.sampleLat.toFixed(2)+'°, '+data.shipSample.sampleLon.toFixed(2)+'°':'unavailable');$('status').textContent='NOAA GFS · interpolated wind + direction';$('info').textContent='NOAA GFS forecast valid '+data.validTime+'. White arrows show wind TO direction; meteorological FROM direction appears in the inspector. Interpolation is display smoothing, not higher model resolution.'}catch(error){if(request!==sequence)return;$('status').textContent='NOAA refresh unavailable · '+String(error.message).slice(0,80);$('info').textContent=grid?'Last successfully loaded NOAA grid retained. Refresh failed: '+error.message:'NOAA wind unavailable: '+error.message;if(!grid){$('wind').textContent='--';$('direction').textContent='Unavailable'}}},500)}
 async function loadWave(targetLat=positionAtHour(forecastHour)?.lat??lat,targetLon=positionAtHour(forecastHour)?.lon??lon){
  const request=++waveRequest,c={lat:targetLat,lng:targetLon};$('status').textContent='Loading official NOAA GFS Wave…';
