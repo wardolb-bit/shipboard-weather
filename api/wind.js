@@ -24,7 +24,6 @@ module.exports=async function(req,res){
   }
   if(!run)throw Error('No published GFS run for requested UTC valid time');
   const {date,cycle}=run;
-  const north=Math.min(89,Math.ceil(lat+11)),south=Math.max(-89,Math.floor(lat-11));
   const central=(lon+360)%360,west=Math.floor(central-11),east=Math.ceil(central+11);
   const north=Math.min(89,Math.ceil(lat+11)),south=Math.max(-89,Math.floor(lat-11));
   const file='gfs.t'+cycle+'z.pgrb2.0p25.f'+String(modelForecastHour).padStart(3,'0');
