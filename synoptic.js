@@ -134,7 +134,7 @@
  function waveContours(){
   if(!flags.waves){remove('waves');return}
   // Height remains meters in NOAA GRIB; levels converted from 3-ft increments.
-  plot('waves',contours(waveGrid,'height',Array.from({length:15},(_,i)=>(i+1)*3/3.28084),'#7ddbe7'))
+  plot('waves',contours(waveGrid,'swell',Array.from({length:15},(_,i)=>(i+1)*3/3.28084),'#7ddbe7'))
  }
  function centers(){
   if(!flags.centers||!valid(grid)){remove('centers');return}
@@ -154,7 +154,7 @@
  function swell(){
   if(!flags.swell||!valid(waveGrid)){remove('swell');return}
   const items=[],seen=new Set();
-  for(const p of waveGrid.points){if(!Number.isFinite(p.swellDirection))continue;
+  for(const p of waveGrid.points){if(!Number.isFinite(p.swellDirection)||!Number.isFinite(p.swell)||p.swell<=0)continue;
    const pixel=map.latLngToContainerPoint([p.lat,wrap(p.lon,map.getCenter().lng)]),size=map.getSize();
    if(pixel.x<0||pixel.y<0||pixel.x>size.x||pixel.y>size.y)continue;
    const key=Math.floor(pixel.x/90)+','+Math.floor(pixel.y/90);if(seen.has(key))continue;seen.add(key);
@@ -162,7 +162,8 @@
    const heading=(p.swellDirection+180)%360;
    items.push(L.marker([p.lat,wrap(p.lon,map.getCenter().lng)],{icon:L.divIcon({className:'',html:'<div style="transform:rotate('+heading+'deg);color:#b0f2eb;font-size:20px;text-shadow:0 1px 2px #000">↑</div>',iconSize:[20,22],iconAnchor:[10,11]}),interactive:false}))
   }
-  plot('swell',items)
+  plot('swell',items);
+  if(!items.length&&flags.swell){$('status').textContent='NOAA swell direction unavailable for this view · no arrows drawn'}
  }
  // WPC official fronts are primarily North American. Do not extrapolate them to the Pacific.
  const frontCoverage={west:-150.6,east:-2.2,south:10,north:91};
