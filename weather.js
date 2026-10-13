@@ -54,7 +54,7 @@ function updateProjection(){
  return p;
 }
 function reloadEncounter(){
- sequence++;waveRequest++;grid=null;waveGrid=null;clearLayers();updateProjection();
+ sequence++;waveRequest++;updateProjection();
  const p=positionAtHour(forecastHour);
  if(encounterMode==='encounter'&&!p){$('wind').textContent='--';$('direction').textContent='Set valid COG and SOG';updateMarineCards();return}
  $('wind').textContent='--';$('direction').textContent='Loading forecast';
