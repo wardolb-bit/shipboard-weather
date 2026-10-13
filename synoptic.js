@@ -223,11 +223,51 @@
   }
   plot('fronts',lines);
  }
+ function opcGeometry(xml){
+  const doc=new DOMParser().parseFromString(xml,'application/xml');
+  if(doc.querySelector('parsererror'))throw Error('Invalid OPC XML');
+  const features=[];
+  const nodes=[...doc.getElementsByTagName('*')];
+  for(const node of nodes){
+   const kind=String(node.getAttribute('pgenType')||'').toLowerCase();
+   const cat=String(node.getAttribute('pgenCategory')||'').toLowerCase();
+   if(!kind.includes('front')&&!cat.includes('front'))continue;
+   const type=kind.includes('cold')?'cold':kind.includes('warm')?'warm':kind.includes('stationary')?'stationary':kind.includes('occluded')?'occluded':kind.includes('trough')?'trough':null;
+   if(!type)continue;
+   // Inner-most drawable matching the type, not its containing group.
+   if([...node.children].some(c=>String(c.getAttribute('pgenType')||'').toLowerCase().includes('front')))continue;
+   const pts=[...node.getElementsByTagName('Point')].map(p=>[Number(p.getAttribute('Lon')),Number(p.getAttribute('Lat'))]).filter(p=>p.every(Number.isFinite)&&p[1]>=-90&&p[1]<=90);
+   if(pts.length<2)continue;
+   features.push({type:'Feature',properties:{feat:type},geometry:{type:'LineString',coordinates:pts}});
+  }
+  return features;
+ }
+ async function pacificFronts(){
+  const hour=forecastHour,token=++frontRequest;
+  const lead=hour<=12?'000':hour<=36?'024':'048';
+  const key='opc-'+lead,cached=frontCache.get(key);
+  if(cached&&Date.now()-cached.at<900000){drawFronts(cached.data,lead);frontLabel('NOAA OPC Pacific surface '+lead+'h · official product, not exact GFS hour');return}
+  frontLabel('Loading official NOAA OPC Pacific fronts…');
+  try{
+   const response=await fetch('/api/pacific-fronts?hour='+hour);
+   if(!response.ok){const error=await response.json().catch(()=>({}));throw Error(error.error||'Pacific OPC data unavailable')}
+   const xml=await response.text(),features=opcGeometry(xml);
+   if(token!==frontRequest||!flags.fronts)return;
+   if(!features.length)throw Error('No vector front coordinates in current OPC product');
+   const data={features};frontCache.set(key,{data,at:Date.now()});
+   drawFronts(data,lead);
+   frontLabel('NOAA OPC Pacific surface '+lead+'h · verified current publication · not exact GFS hour');
+  }catch(e){
+   if(token!==frontRequest)return;
+   remove('fronts');frontLabel(String(e.message).slice(0,130));
+  }
+ }
  async function fronts(){
   if(!flags.fronts){remove('fronts');frontLabel('');return}
   const center=map.getCenter(),longitude=normalizeLon(center.lng);
+  if(longitude>115||longitude< -150.6){if(center.lat>=0&&center.lat<=70)return pacificFronts();remove('fronts');frontLabel('No official OPC Pacific frontal vector coverage here');return}
   if(longitude<frontCoverage.west||longitude>frontCoverage.east||center.lat<frontCoverage.south||center.lat>frontCoverage.north){
-   remove('fronts');frontLabel('NOAA WPC fronts · no official coverage at this map location');return
+   remove('fronts');frontLabel('NOAA fronts · no official coverage at this map location');return
   }
   const day=wpcDay(forecastHour),cached=frontCache.get(day);
   if(cached&&Date.now()-cached.at<900000){
