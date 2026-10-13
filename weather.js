@@ -187,6 +187,41 @@ const panels={layers:'<p>NOAA GFS U/V winds. Interpolated colors and wind-to dir
 function openPanel(type){$('drawer').classList.add('open');$('panelTitle').textContent=type.toUpperCase();$('panelBody').innerHTML=panels[type];if(type==='layers')$('refresh').onclick=refresh;if(type==='position'){$('manualLat').value=lat;$('manualLon').value=lon;$('setPosition').onclick=()=>{const a=Number($('manualLat').value),b=Number($('manualLon').value);if(!Number.isFinite(a)||!Number.isFinite(b)||Math.abs(a)>90||Math.abs(b)>180)return alert('Invalid coordinates');updateShip(a,b);map.setView([a,b],5)}}if(type==='grib'){const d=new Date(Date.now()-10*3600000);$('date').value=d.toISOString().slice(0,10);$('cycle').value=String(Math.floor(d.getUTCHours()/6)*6);$('download').onclick=downloadGrib}}
 document.querySelectorAll('[data-panel]').forEach(b=>b.onclick=()=>openPanel(b.dataset.panel));$('close').onclick=()=>$('drawer').classList.remove('open');
 function downloadGrib(){const date=$('date').value.replaceAll('-',''),c=Number($('cycle').value),h=Number($('hour').value),n=Number($('north').value),s=Number($('south').value),w=Number($('west').value),e=Number($('east').value);if(!/^20\d{6}$/.test(date)||![0,6,12,18].includes(c)||!Number.isInteger(h)||h<0||h>168||!(n<=90&&s>=-90&&n>s&&w>=0&&e<=360&&w<e))return $('downloadStatus').textContent='Invalid download settings';const cycle=String(c).padStart(2,'0'),q=new URLSearchParams({file:'gfs.t'+cycle+'z.pgrb2.0p25.f'+String(h).padStart(3,'0'),dir:'/gfs.'+date+'/'+cycle+'/atmos',subregion:'',leftlon:String(w),rightlon:String(e),toplat:String(n),bottomlat:String(s)});if($('uv').checked){q.set('var_UGRD','on');q.set('var_VGRD','on');q.set('lev_10_m_above_ground','on')}if($('gust').checked){q.set('var_GUST','on');q.set('lev_surface','on')}if($('mslp').checked){q.set('var_PRMSL','on');q.set('lev_mean_sea_level','on')}if(!($('uv').checked||$('gust').checked||$('mslp').checked))return $('downloadStatus').textContent='Select at least one variable';const link='https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl?'+q;$('downloadLink').href=link;$('downloadLink').textContent='Open official NOAA GRIB2 link';$('downloadStatus').textContent='Direct NOAA download';window.open(link,'_blank','noopener,noreferrer')}
+
+function closeContextMenu(){$('contextMenu').hidden=true}
+function showContextMenu(event){
+ event.preventDefault();
+ const menu=$('contextMenu');menu.replaceChildren();
+ const heading=text=>{const label=document.createElement('div');label.className='menu-heading';label.textContent=text;menu.appendChild(label)};
+ const separator=()=>{const line=document.createElement('div');line.className='menu-separator';menu.appendChild(line)};
+ const item=(name,action)=>{const button=document.createElement('button');button.type='button';button.textContent=name;button.onclick=()=>{closeContextMenu();action()};menu.appendChild(button)};
+ heading('WEATHER LAYERS');
+ item((mode==='wind'?'✓ ':'')+'Wind',()=>{windOn=true;selectMode('wind')});
+ item((mode==='gust'?'✓ ':'')+'Gusts',()=>{windOn=true;selectMode('gust')});
+ item((mode==='wave'?'✓ ':'')+'Waves',()=>{windOn=true;selectMode('wave')});
+ item('Wind direction: '+(arrowsOn?'ON':'OFF'),()=>$('directionBtn').click());
+ item('Weather overlay: '+(windOn?'ON':'OFF'),()=>$('windBtn').click());
+ separator();heading('FORECAST TOOLS');
+ item('Fixed position',()=>{$('encounterMode').value='fixed';$('encounterMode').dispatchEvent(new Event('change'));$('chartControls').hidden=true});
+ item('Vessel encounter',()=>{$('encounterMode').value='encounter';$('encounterMode').dispatchEvent(new Event('change'));$('chartControls').hidden=false});
+ item((comparing?'✓ ':'')+'Compare courses',()=>$('compareBtn').click());
+ item('Course / speed settings',()=>$('chartControls').hidden=false);
+ separator();heading('MAP & DATA');
+ item('Center on vessel',()=>$('center').click());
+ item('Refresh forecast',()=>{const p=positionAtHour(forecastHour);if(p){refresh(p.lat,p.lon,true);loadWave(p.lat,p.lon)}});
+ item('Download NOAA GRIB',()=>openPanel('grib'));
+ menu.hidden=false;
+ const area=document.querySelector('.maparea').getBoundingClientRect();
+ const x=Math.max(5,Math.min(event.clientX-area.left,area.width-menu.offsetWidth-5));
+ const y=Math.max(5,Math.min(event.clientY-area.top,area.height-menu.offsetHeight-5));
+ menu.style.left=x+'px';menu.style.top=y+'px';
+}
+$('map').addEventListener('contextmenu',showContextMenu);
+document.querySelector('.maparea').addEventListener('contextmenu',event=>{if(event.target.closest('#contextMenu, #chartControls, #comparePanel, #drawer'))return;showContextMenu(event)});
+document.addEventListener('pointerdown',event=>{if(!event.target.closest('#contextMenu'))closeContextMenu()});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'){closeContextMenu();$('chartControls').hidden=true}});
+$('closeChartControls').onclick=()=>$('chartControls').hidden=true;
+
 for(const h of [0,6,12,18,24,36,48,72]){const b=document.createElement('button');b.textContent='+'+h+'h · '+forecastLabel(h);b.title=validAtFor(h);b.dataset.hour=String(h);b.onclick=()=>{
  if(forecastHour===h)return;forecastHour=h;sequence++;waveRequest++;grid=null;waveGrid=null;clearLayers();updateMarineCards();$('wind').textContent='--';$('direction').textContent='Loading NOAA forecast';
  $('timeStatus').textContent='Selected '+forecastLabel(h)+' · retrieving NOAA wind and waves';
