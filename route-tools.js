@@ -48,6 +48,7 @@
  q('routeUndo').onclick=()=>{waypoints.pop();redraw()};
  q('routeClear').onclick=()=>{waypoints=[];records=[];analysisToken++;q('routeTimeline').replaceChildren();q('routeSummary').textContent='Route cleared';redraw()};
  q('routeSpeed').onchange=redraw;
+ document.addEventListener('vessel-advisories-changed',()=>{const t=limits();q('limitWind').value=t.wind;q('limitGust').value=t.gust;q('limitSea').value=t.sea;if(records.length)summarize()});
  document.addEventListener('weather-hour-changed',()=>{if(!q('routePanel').hidden)drawProjection()});
  function closest(data,pos){
   if(!data?.points?.length)return null;let best=null,dist=Infinity;
@@ -57,7 +58,7 @@
  const fromWind=w=>(Math.atan2(-w.u,-w.v)*180/Math.PI+360)%360;
  function bearing(a,b){const p1=radians(a.lat),p2=radians(b.lat),delta=radians(normalize(b.lon-a.lon));return (Math.atan2(Math.sin(delta)*Math.cos(p2),Math.cos(p1)*Math.sin(p2)-Math.sin(p1)*Math.cos(p2)*Math.cos(delta))*180/Math.PI+360)%360}
  function sector(direction,course){if(!Number.isFinite(direction)||!Number.isFinite(course))return '--';const r=((direction-course+540)%360)-180,a=Math.abs(r);return a<=22.5?'Head':a<=67.5?'Bow '+(r<0?'port':'stbd'):a<=112.5?'Beam '+(r<0?'port':'stbd'):a<=157.5?'Quarter '+(r<0?'port':'stbd'):'Following'}
- function limits(){return {wind:Number(q('limitWind').value),gust:Number(q('limitGust').value),sea:Number(q('limitSea').value)}}
+ function limits(){return window.vesselAdvisories?.get()||{wind:Number(q('limitWind').value),gust:Number(q('limitGust').value),sea:Number(q('limitSea').value)}}
  function summarize(){
   const summary=q('routeSummary'),lim=limits();
   const highs=key=>{const vals=records.map(r=>r[key]).filter(Number.isFinite);return vals.length?Math.max(...vals):null};
@@ -94,6 +95,6 @@
   records.sort((a,b)=>a.hour-b.hour);summarize();
  }
  q('routeAnalyze').onclick=analyze;
- for(const id of ['limitWind','limitGust','limitSea'])q(id).onchange=()=>{if(records.length)summarize()};
+ for(const id of ['limitWind','limitGust','limitSea'])q(id).onchange=()=>{const t={wind:Number(q('limitWind').value),gust:Number(q('limitGust').value),sea:Number(q('limitSea').value)};window.vesselAdvisories?.set(t);if(records.length)summarize()};
  window.routePlanner={open,close,redraw};
 })();
