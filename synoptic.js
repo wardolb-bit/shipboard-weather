@@ -28,23 +28,67 @@
   plot('barbs',items)
  }
  // Marching squares yields short, accurate isopleth segments from actual gridded values.
+ // Join marching-square segments by shared endpoints, then smooth their display geometry.
+ // NOAA pressure values and contour levels stay unchanged.
+ function smoothContour(points){
+  if(points.length<3)return points;
+  let line=points;
+  for(let pass=0;pass<2;pass++){
+   const next=[line[0]];
+   for(let i=0;i<line.length-1;i++){
+    const a=line[i],b=line[i+1];
+    next.push([.75*a[0]+.25*b[0],.75*a[1]+.25*b[1]],[.25*a[0]+.75*b[0],.25*a[1]+.75*b[1]]);
+   }
+   next.push(line[line.length-1]);line=next;
+  }
+  return line
+ }
  function contours(data,field,levels,color){
   const items=[];if(!valid(data))return items;
   const pts=data.points,lookup=new Map(pts.map(p=>[p.lat.toFixed(3)+','+p.lon.toFixed(3),p]));
   const at=(a,b)=>lookup.get(a.toFixed(3)+','+b.toFixed(3));
   const lats=[...new Set(pts.map(p=>p.lat))].sort((a,b)=>a-b),lons=[...new Set(pts.map(p=>p.lon))].sort((a,b)=>a-b);
-  const edges=[[0,1],[1,2],[2,3],[3,0]];
+  const edges=[[0,1],[1,2],[2,3],[3,0]],segments=new Map();
   let count=0;
   for(let i=0;i<lats.length-1;i++)for(let j=0;j<lons.length-1;j++){
-   const a=lats[i],b=lats[i+1],c=lons[j],d=lons[j+1];
-   const xy=[[a,c],[a,d],[b,d],[b,c]];
+   const a=lats[i],b=lats[i+1],c=lons[j],d=lons[j+1],xy=[[a,c],[a,d],[b,d],[b,c]];
    const ps=xy.map(x=>at(...x));if(ps.some(p=>!Number.isFinite(p?.[field])))continue;
    const vs=ps.map(p=>p[field]);
    for(const level of levels){
-    const crossings=[];for(const [x,y] of edges){const v1=vs[x],v2=vs[y];if((v1<level&&v2>=level)||(v2<level&&v1>=level)){const t=(level-v1)/(v2-v1);crossings.push([xy[x][0]+t*(xy[y][0]-xy[x][0]),xy[x][1]+t*(xy[y][1]-xy[x][1])])}}
-    for(let k=0;k+1<crossings.length;k+=2){if(++count>10000)return items;
-     items.push(L.polyline(crossings.slice(k,k+2).map(p=>[p[0],wrap(p[1],map.getCenter().lng)]),{color,weight:1.25,opacity:.8,interactive:false}))
+    const crossings=[];
+    for(const [x,y] of edges){
+     const v1=vs[x],v2=vs[y];
+     if((v1<level&&v2>=level)||(v2<level&&v1>=level)){
+      const t=(level-v1)/(v2-v1);
+      crossings.push([xy[x][0]+t*(xy[y][0]-xy[x][0]),xy[x][1]+t*(xy[y][1]-xy[x][1])]);
+     }
     }
+    for(let k=0;k+1<crossings.length;k+=2){
+     if(++count>10000)break;
+     if(!segments.has(level))segments.set(level,[]);
+     segments.get(level).push([crossings[k],crossings[k+1]]);
+    }
+   }
+  }
+  const key=p=>p[0].toFixed(5)+','+p[1].toFixed(5);
+  for(const [level,edgesForLevel] of segments){
+   const adjacency=new Map();
+   edgesForLevel.forEach((edge,i)=>edge.forEach(p=>{const k=key(p);if(!adjacency.has(k))adjacency.set(k,[]);adjacency.get(k).push(i)}));
+   const used=new Set();
+   for(let i=0;i<edgesForLevel.length;i++){
+    if(used.has(i))continue;
+    used.add(i);const line=[...edgesForLevel[i]];
+    for(const head of [false,true]){
+     while(true){
+      const end=head?line[0]:line[line.length-1],candidate=(adjacency.get(key(end))||[]).find(j=>!used.has(j));
+      if(candidate===undefined)break;
+      used.add(candidate);const edge=edgesForLevel[candidate],other=key(edge[0])===key(end)?edge[1]:edge[0];
+      if(head)line.unshift(other);else line.push(other);
+     }
+    }
+    if(line.length<2)continue;
+    const smooth=field==='mslp'?smoothContour(line):line;
+    items.push(L.polyline(smooth.map(p=>[p[0],wrap(p[1],map.getCenter().lng)]),{color,weight:field==='mslp'?1.6:1.25,opacity:.9,interactive:false,smoothFactor:.5}));
    }
   }
   return items
