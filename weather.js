@@ -9,7 +9,7 @@ function frameKey(hour,point){return hour+'|'+Math.round(point.lat*2)/2+'|'+Math
 function saveHourFrame(){const point=frameLocation();if(!point||!grid||!waveGrid||grid.validTime!==validAtFor(forecastHour)||waveGrid.validTime!==validAtFor(forecastHour))return;hourFrames.set(frameKey(forecastHour,point),{wind:grid,wave:waveGrid,at:Date.now()});if(hourFrames.size>24)hourFrames.delete(hourFrames.keys().next().value);if(hourFrames.size===1)setTimeout(preloadNearby,2000);if(typeof markForecastAdvisories==='function')markForecastAdvisories()}
 let preloading=false;
 async function preloadNearby(){if(preloading||hourFrames.size===0)return;preloading=true;const selected=forecastHour;const candidates=[6,12,24,18,36,48,72,0].filter(h=>h!==selected);for(const h of candidates.slice(0,3)){const p=encounterMode==='encounter'?positionAtHour(h):map.getCenter();if(!p)continue;const c={lat:p.lat,lng:p.lng??p.lon};if(hourFrames.has(frameKey(h,c)))continue;await Promise.allSettled([forecastData('wind',c,h),forecastData('wave',c,h)]);await new Promise(resolve=>setTimeout(resolve,500))}preloading=false}
-function restoreHourFrame(){const point=frameLocation();if(!point)return false;const entry=hourFrames.get(frameKey(forecastHour,point));if(!entry||Date.now()-entry.at>CACHE_TTL_MS)return false;grid=entry.wind;waveGrid=entry.wave;updateMarineCards();updateProjection();render();window.synoptic?.update();$('status').textContent='Cached NOAA forecast · instant frame';$('validTime').textContent='Valid: '+validAtFor(forecastHour);return true}
+function restoreHourFrame(){const point=frameLocation();if(!point)return false;const entry=hourFrames.get(frameKey(forecastHour,point));if(!entry||Date.now()-entry.at>CACHE_TTL_MS||!entry.wind?.viewportTiles||!entry.wave?.viewportTiles)return false;grid=entry.wind;waveGrid=entry.wave;updateMarineCards();updateProjection();render();window.synoptic?.update();$('status').textContent='Cached NOAA forecast · instant frame';$('validTime').textContent='Valid: '+validAtFor(forecastHour);return true}
 
 function validAtFor(hour=forecastHour){return new Date(timelineBase.getTime()+hour*3600000).toISOString()}
 function forecastLabel(hour){return validAtFor(hour).slice(5,16).replace('T',' ')+' UTC'}
@@ -94,7 +94,7 @@ function reloadEncounter(){
  const p=positionAtHour(forecastHour);
  if(encounterMode==='encounter'&&!p){$('wind').textContent='--';$('direction').textContent='Set valid COG and SOG';updateMarineCards();return}
  $('wind').textContent='--';$('direction').textContent='Loading forecast';
- refresh(p.lat,p.lon,true);loadWave(p.lat,p.lon);
+ refresh(p.lat,p.lon,false);loadWave(p.lat,p.lon);
 }
 $('encounterMode').onchange=()=>{encounterMode=$('encounterMode').value;reloadEncounter()};
 $('manualMotion').onchange=()=>{const manual=$('manualMotion').checked;$('motionCog').disabled=!manual;$('motionSog').disabled=!manual;reloadEncounter()};
@@ -383,6 +383,6 @@ for(const h of [0,6,12,18,24,36,48,72]){const b=document.createElement('button')
  if(forecastHour===h)return;forecastHour=h;updateHud();sequence++;waveRequest++;clearTimeout(debounce);const instant=restoreHourFrame();if(!instant){$('status').textContent='Loading NOAA forecast · retaining previous map until ready';$('wind').textContent='--';$('direction').textContent='Loading NOAA forecast'};
  $('timeStatus').textContent='Selected '+forecastLabel(h)+' · retrieving NOAA wind and waves';
  $('forecastScrubber').value=[...$('steps').children].indexOf(b);$('playbackValid').textContent='+'+h+'h';for(const btn of $('steps').children)btn.classList.toggle('selected',btn===b);
- if(!instant)reloadEncounter();else updateProjection();if(comparing)refreshComparison();window.vesselAdvisories?.update();window.synoptic?.update();document.dispatchEvent(new CustomEvent('weather-hour-changed',{detail:{hour:h}}));
+ if(!instant)reloadEncounter();else {updateProjection();if(!insideGrid())refresh();}if(comparing)refreshComparison();window.vesselAdvisories?.update();window.synoptic?.update();document.dispatchEvent(new CustomEvent('weather-hour-changed',{detail:{hour:h}}));
  };if(h===0)b.classList.add('selected');$('steps').appendChild(b)}
 $('timeStatus').textContent='Selected '+forecastLabel(0)+' · NOAA forecast valid time';updateLegend();updateProjection();updateHud();refresh();setTimeout(loadWave,1500);
