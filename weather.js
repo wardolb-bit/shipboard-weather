@@ -6,9 +6,48 @@ const requestCache=new Map(),CACHE_TTL_MS=20*60*1000;
 const renderedFrames=new WeakMap(),hourFrames=new Map();
 function frameLocation(){const p=positionAtHour(forecastHour);return encounterMode==='encounter'?p:map.getCenter()}
 function frameKey(hour,point){return hour+'|'+Math.round(point.lat*2)/2+'|'+Math.round((point.lng??point.lon)*2)/2}
-function saveHourFrame(){const point=frameLocation();if(!point||!grid||!waveGrid||grid.validTime!==validAtFor(forecastHour)||waveGrid.validTime!==validAtFor(forecastHour))return;hourFrames.set(frameKey(forecastHour,point),{wind:grid,wave:waveGrid,at:Date.now()});if(hourFrames.size>24)hourFrames.delete(hourFrames.keys().next().value);if(hourFrames.size===1)setTimeout(preloadNearby,2000);if(typeof markForecastAdvisories==='function')markForecastAdvisories()}
-let preloading=false;
-async function preloadNearby(){if(preloading||hourFrames.size===0)return;preloading=true;const selected=forecastHour;const candidates=[6,12,24,18,36,48,72,0].filter(h=>h!==selected);for(const h of candidates.slice(0,3)){const p=encounterMode==='encounter'?positionAtHour(h):map.getCenter();if(!p)continue;const c={lat:p.lat,lng:p.lng??p.lon};if(hourFrames.has(frameKey(h,c)))continue;await Promise.allSettled([forecastData('wind',c,h),forecastData('wave',c,h)]);await new Promise(resolve=>setTimeout(resolve,500))}preloading=false}
+function saveHourFrame(){const point=frameLocation();if(!point||!grid||!waveGrid||grid.validTime!==validAtFor(forecastHour)||waveGrid.validTime!==validAtFor(forecastHour))return;hourFrames.set(frameKey(forecastHour,point),{wind:grid,wave:waveGrid,at:Date.now()});if(hourFrames.size>24)hourFrames.delete(hourFrames.keys().next().value);if(hourFrames.size===1)queuePreload(2500);preloadStatus();if(typeof markForecastAdvisories==='function')markForecastAdvisories()}
+const preloadHours=[0,6,12,18,24,36,48,72];
+let preloading=false,preloadEpoch=0,preloadTimer=null;
+function preloadStatus(){
+ const el=$('cacheStatus');if(!el||!map)return;
+ const p=map.getCenter(),now=Date.now();
+ const ready=preloadHours.filter(h=>{
+  const entry=hourFrames.get(frameKey(h,p));
+  return entry&&now-entry.at<CACHE_TTL_MS&&entry.wind?.viewportTiles&&entry.wave?.viewportTiles&&!entry.wind.viewportIncomplete&&!entry.wave.viewportIncomplete;
+ }).length;
+ el.textContent='CACHE '+ready+'/'+preloadHours.length+(preloading?' · LOADING':'');
+}
+function queuePreload(delay=2000){
+ ++preloadEpoch;
+ clearTimeout(preloadTimer);
+ preloadTimer=setTimeout(()=>{if(!preloading)preloadNearby()},delay);
+ preloadStatus();
+}
+async function preloadNearby(){
+ if(preloading||!map||document.visibilityState==='hidden')return;
+ preloading=true;
+ const epoch=preloadEpoch,center=map.getCenter();
+ const position={lat:center.lat,lng:center.lng};
+ try{
+  for(const h of preloadHours.filter(h=>h!==forecastHour)){
+   if(epoch!==preloadEpoch||document.visibilityState==='hidden')break;
+   const cached=hourFrames.get(frameKey(h,position));
+   if(cached&&Date.now()-cached.at<CACHE_TTL_MS&&cached.wind?.viewportTiles&&cached.wave?.viewportTiles&&!cached.wind.viewportIncomplete&&!cached.wave.viewportIncomplete)continue;
+   const [w,a]=await Promise.allSettled([forecastViewport('wind',h),forecastViewport('wave',h)]);
+   if(epoch!==preloadEpoch)break;
+   if(w.status==='fulfilled'&&a.status==='fulfilled'){
+    hourFrames.set(frameKey(h,position),{wind:w.value,wave:a.value,at:Date.now()});
+    if(hourFrames.size>24)hourFrames.delete(hourFrames.keys().next().value);
+   }
+   preloadStatus();
+   await new Promise(resolve=>setTimeout(resolve,750));
+  }
+ }finally{
+  preloading=false;preloadStatus();
+  if(epoch!==preloadEpoch&&document.visibilityState!=='hidden')queuePreload(2500);
+ }
+}
 function restoreHourFrame(){const point=frameLocation();if(!point)return false;const entry=hourFrames.get(frameKey(forecastHour,point));if(!entry||Date.now()-entry.at>CACHE_TTL_MS||!entry.wind?.viewportTiles||!entry.wave?.viewportTiles||entry.wind.viewportIncomplete||entry.wave.viewportIncomplete)return false;grid=entry.wind;waveGrid=entry.wave;updateMarineCards();updateProjection();render();window.synoptic?.update();$('status').textContent='Cached NOAA forecast · instant frame';$('validTime').textContent='Valid: '+validAtFor(forecastHour);return true}
 
 function validAtFor(hour=forecastHour){return new Date(timelineBase.getTime()+hour*3600000).toISOString()}
@@ -253,7 +292,7 @@ function updateLegend(){
  $('legendTicks').replaceChildren(...scale.ticks.map(value=>{const el=document.createElement('span');el.textContent=value;return el}));
 }
 function clock(){$('clock').textContent=new Date().toISOString().slice(11,19)+' UTC'}clock();setInterval(clock,1000);
-if(window.L){map=L.map('map',{worldCopyJump:true}).setView([lat,lon],5);L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors',maxZoom:19}).addTo(map);ship=L.marker([lat,lon],{icon:L.divIcon({className:'',iconSize:[32,32],iconAnchor:[16,16],html:'<svg viewBox="0 0 32 32" width="32"><path d="M16 2 27 29 16 24 5 29Z" fill="#41d5ec" stroke="white" stroke-width="2.5"/></svg>'})}).addTo(map);map.on('moveend',()=>{if(windOn){if(mode==='wave')loadWave(map.getCenter().lat,map.getCenter().lng);else refresh()}})}
+if(window.L){map=L.map('map',{worldCopyJump:true}).setView([lat,lon],5);L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors',maxZoom:19}).addTo(map);ship=L.marker([lat,lon],{icon:L.divIcon({className:'',iconSize:[32,32],iconAnchor:[16,16],html:'<svg viewBox="0 0 32 32" width="32"><path d="M16 2 27 29 16 24 5 29Z" fill="#41d5ec" stroke="white" stroke-width="2.5"/></svg>'})}).addTo(map);map.on('moveend',()=>{if(windOn){if(mode==='wave')loadWave(map.getCenter().lat,map.getCenter().lng);else refresh()}queuePreload(3500)})}
 function nearestToVessel(data){if(!data?.points?.length)return null;const pos=positionAtHour(forecastHour);if(!pos)return null;const {lat:sampleLat,lon:sampleLon}=pos;let best=null,d=Infinity;for(const p of data.points){const distance=Math.abs(p.lat-sampleLat)+longitudeDelta(p.lon,sampleLon)*Math.cos(sampleLat*Math.PI/180);if(distance<d){d=distance;best=p}}return d<3?best:null}
 function updateMarineCards(){
  const pos=positionAtHour(forecastHour)||{lat,lon};const sampleLat=pos.lat,sampleLon=pos.lon;
@@ -448,7 +487,7 @@ document.addEventListener('keydown',event=>{if(event.key==='Escape')closeContext
 
 
 for(const h of [0,6,12,18,24,36,48,72]){const b=document.createElement('button');b.textContent='+'+h+'h · '+forecastLabel(h);b.title=validAtFor(h);b.dataset.hour=String(h);b.onclick=()=>{
- if(forecastHour===h)return;forecastHour=h;vesselWaveSample=null;vesselWaveAt=0;updateHud();sequence++;waveRequest++;clearTimeout(debounce);const instant=restoreHourFrame();if(!instant){$('status').textContent='Loading NOAA forecast · retaining previous map until ready';$('wind').textContent='--';$('direction').textContent='Loading NOAA forecast'};
+ if(forecastHour===h)return;forecastHour=h;queuePreload(3000);vesselWaveSample=null;vesselWaveAt=0;updateHud();sequence++;waveRequest++;clearTimeout(debounce);const instant=restoreHourFrame();if(!instant){$('status').textContent='Loading NOAA forecast · retaining previous map until ready';$('wind').textContent='--';$('direction').textContent='Loading NOAA forecast'};
  $('timeStatus').textContent='Selected '+forecastLabel(h)+' · retrieving NOAA wind and waves';
  $('forecastScrubber').value=[...$('steps').children].indexOf(b);$('playbackValid').textContent='+'+h+'h';for(const btn of $('steps').children)btn.classList.toggle('selected',btn===b);
  if(!instant)reloadEncounter();else {updateProjection();if(!insideGrid()||grid?.viewportIncomplete)refresh();}if(comparing)refreshComparison();window.vesselAdvisories?.update();window.synoptic?.update();document.dispatchEvent(new CustomEvent('weather-hour-changed',{detail:{hour:h}}));
