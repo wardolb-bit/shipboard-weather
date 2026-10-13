@@ -120,7 +120,7 @@
      }
     }
     if(line.length<2)continue;
-    items.push(L.polyline(line.map(p=>[p[0],wrap(p[1],map.getCenter().lng)]),{color,weight:field==='mslp'?1.5:1.25,opacity:.9,interactive:false,smoothFactor:0}));
+    const points=line.map(p=>[p[0],wrap(p[1],map.getCenter().lng)]);items.push(L.polyline(points,{color,weight:field==='mslp'?1.5:1.25,opacity:.9,interactive:false,smoothFactor:0}));if(field==='mslp'&&points.length>14&&Math.round(level)%4===0&&map.getZoom()>=4){const mid=points[Math.floor(points.length/2)],pixel=map.latLngToContainerPoint(mid),size=map.getSize();if(pixel.x>45&&pixel.x<size.x-45&&pixel.y>40&&pixel.y<size.y-40){items.push(L.marker(mid,{interactive:false,icon:L.divIcon({className:'',iconSize:[38,16],iconAnchor:[19,8],html:'<span style="display:block;text-align:center;font:600 11px system-ui;color:#f3f7ff;background:#102b3fce;border-radius:4px;padding:1px 2px;text-shadow:0 1px 2px #000">'+Math.round(level)+'</span>'})}))}}
    }
   }
   return items;
@@ -202,10 +202,9 @@
     // NOAA supplied geometry/type, chart glyphs along the same paths (not inferred fronts).
     if(type==='trough')continue;
     const distance=path.reduce((n,p,i)=>i?n+map.distance(path[i-1],p):n,0);
-    const count=Math.min(35,Math.floor(distance/220000));
-    if(!count)continue;
     const pixelLength=path.reduce((n,p,i)=>i?n+map.latLngToLayerPoint(path[i-1]).distanceTo(map.latLngToLayerPoint(p)):n,0);
     if(pixelLength<80)continue;
+    const count=Math.min(28,Math.floor(pixelLength/82));if(!count)continue;
     for(let k=1;k<=count;k++){
      const fraction=k/(count+1),goal=distance*fraction;
      let travelled=0;
@@ -213,7 +212,7 @@
       const d=map.distance(path[i-1],path[i]);if(travelled+d<goal){travelled+=d;continue}
       const t=d?(goal-travelled)/d:0;
       const la=path[i-1][0]+(path[i][0]-path[i-1][0])*t,lo=path[i-1][1]+(path[i][1]-path[i-1][1])*t;
-      const dir=Math.atan2(path[i][1]-path[i-1][1],path[i][0]-path[i-1][0])*180/Math.PI;
+      const pa=map.latLngToLayerPoint(path[i-1]),pb=map.latLngToLayerPoint(path[i]);const dir=Math.atan2(pb.y-pa.y,pb.x-pa.x)*180/Math.PI;
       const cold=type==='cold'||(type==='stationary'&&k%2===0)||(type==='occluded'&&k%2===0);
       const glyph=cold?'▲':'●',c=type==='stationary'?(cold?'#368af9':'#fc666a'):style.color;
       lines.push(L.marker([la,lo],{interactive:false,icon:L.divIcon({className:'',iconSize:[13,13],iconAnchor:[6,6],html:'<div style="color:'+c+';font-size:14px;line-height:13px;text-shadow:0 0 2px #001;transform:rotate('+dir+'deg)">'+glyph+'</div>'})}));
@@ -245,7 +244,7 @@
    frontLabel('NOAA WPC Day '+day+' frontal forecast'+(date?' · data '+new Date(date).toISOString().slice(0,16)+'Z':'')+' · NOT exact GFS valid time');
   }catch(error){if(token!==frontRequest)return;remove('fronts');frontLabel('NOAA frontal data unavailable · '+String(error.message).slice(0,75))}
  }
- function update(){clearTimeout(schedule);schedule=setTimeout(()=>{windBarbs();pressure();waveContours();centers();swell();fronts()},65)}
+ function update(){clearTimeout(schedule);schedule=setTimeout(()=>{windBarbs();pressure();waveContours();centers();swell();fronts()},110)}
  function toggle(name){flags[name]=!flags[name];if(name==='fronts')frontRequest++;update()}
  function preset(name){
   const next=name==='synoptic'?{barbs:true,pressure:true,centers:true,waves:false,swell:false,fronts:flags.fronts}:name==='clean'?{barbs:false,pressure:false,centers:false,waves:false,swell:false,fronts:false}:{barbs:false,pressure:false,centers:false,waves:false,swell:false,fronts:flags.fronts};
