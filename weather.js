@@ -55,6 +55,74 @@ function reloadEncounter(){
 $('encounterMode').onchange=()=>{encounterMode=$('encounterMode').value;reloadEncounter()};
 $('manualMotion').onchange=()=>{const manual=$('manualMotion').checked;$('motionCog').disabled=!manual;$('motionSog').disabled=!manual;reloadEncounter()};
 for(const id of ['motionCog','motionSog'])$(id).onchange=()=>{if($('manualMotion').checked)reloadEncounter()};
+
+// Independent two-course comparison; single-track Vessel Encounter remains unchanged.
+let comparing=false,compareLayers=[],compareSequence=0;
+const compareColors=['#4fc9e0','#f5c66c'];
+function compareInputs(i){
+ const suffix=i===0?'A':'B',cEl=$('compareCog'+suffix),sEl=$('compareSog'+suffix);
+ const course=Number(cEl.value),sog=Number(sEl.value);
+ return cEl.value!==''&&sEl.value!==''&&Number.isFinite(course)&&Number.isFinite(sog)&&course>=0&&course<360&&sog>=0&&sog<=60?{course,sog}:null;
+}
+function projectedCoursePosition(hours,motion){
+ const theta=motion.course*Math.PI/180,d=motion.sog*hours/3440.065,phi=lat*Math.PI/180,lambda=lon*Math.PI/180;
+ const nextPhi=Math.asin(Math.sin(phi)*Math.cos(d)+Math.cos(phi)*Math.sin(d)*Math.cos(theta));
+ const nextLon=lambda+Math.atan2(Math.sin(theta)*Math.sin(d)*Math.cos(phi),Math.cos(d)-Math.sin(phi)*Math.sin(nextPhi));
+ return {lat:nextPhi*180/Math.PI,lon:normalizeLon(nextLon*180/Math.PI)};
+}
+function clearComparisonMap(){for(const layer of compareLayers)map.removeLayer(layer);compareLayers=[]}
+function drawComparison(){
+ clearComparisonMap();if(!comparing)return;
+ for(let i=0;i<2;i++){
+  const motion=compareInputs(i);if(!motion)continue;
+  const pts=[];for(let j=0;j<=24;j++){const p=projectedCoursePosition(forecastHour*j/24,motion);pts.push([p.lat,lonNear(p.lon,lon)])}
+  const color=compareColors[i],pos=projectedCoursePosition(forecastHour,motion);
+  if(forecastHour>0){
+   compareLayers.push(L.polyline(pts,{color,weight:2.5,dashArray:'7 6',interactive:false}).addTo(map));
+   compareLayers.push(L.circleMarker([pos.lat,lonNear(pos.lon,lon)],{color,radius:7,weight:2,fillColor:color,fillOpacity:.6}).bindTooltip('COURSE '+(i?'B':'A')+' +'+forecastHour+'h').addTo(map));
+  }
+ }
+}
+function compareClosest(data,pos){
+ if(!data?.points?.length)return null;
+ let closest=null,best=Infinity;
+ for(const p of data.points){const d=Math.abs(pos.lat-p.lat)+longitudeDelta(pos.lon,p.lon)*Math.cos(pos.lat*Math.PI/180);if(d<best){closest=p;best=d}}
+ return best<1.5?closest:null;
+}
+async function refreshComparison(){
+ if(!comparing)return;const request=++compareSequence;
+ const motions=[compareInputs(0),compareInputs(1)];
+ drawComparison();$('compareValid').textContent='Valid '+validAtFor(forecastHour);
+ for(const letter of ['A','B'])for(const field of ['wind','gust','sea','swell','dir','waveDir','pos'])$('comp'+letter+field).textContent='--';
+ if(motions.some(x=>!x)){$('compareStatus').textContent='Enter COG 0–359.9° and SOG 0–60 kt for both courses.';return}
+ $('compareStatus').textContent='Retrieving NOAA forecasts at both projected positions…';
+ await Promise.all(motions.map(async(motion,i)=>{
+  const letter=i?'B':'A',pos=projectedCoursePosition(forecastHour,motion),c={lat:pos.lat,lng:pos.lon};
+  $('comp'+letter+'pos').textContent=nauticalCoord(pos.lat,true)+' '+nauticalCoord(pos.lon,false);
+  const [w,sea]=await Promise.allSettled([forecastData('wind',c,forecastHour),forecastData('wave',c,forecastHour)]);
+  if(request!==compareSequence||!comparing)return;
+  if(w.status==='fulfilled'){
+   const wind=w.value.shipSample||compareClosest(w.value,pos);
+   if(wind){$('comp'+letter+'wind').textContent=speed(wind).toFixed(0)+' kt';$('comp'+letter+'gust').textContent=Number.isFinite(wind.gust)?(wind.gust*1.943844).toFixed(0)+' kt':'--';$('comp'+letter+'dir').textContent=Math.round((Math.atan2(-wind.u,-wind.v)*180/Math.PI+360)%360)+'°'}
+  }
+  if(sea.status==='fulfilled'){
+   const p=compareClosest(sea.value,pos);
+   if(p){$('comp'+letter+'sea').textContent=Number.isFinite(p.height)?(p.height*3.28084).toFixed(1)+' ft':'--';$('comp'+letter+'swell').textContent=Number.isFinite(p.swell)?(p.swell*3.28084).toFixed(1)+' ft':'--';$('comp'+letter+'waveDir').textContent=Number.isFinite(p.direction)?Math.round(p.direction)+'°':'--'}
+  }
+  if(w.status==='rejected'||sea.status==='rejected')$('compareStatus').textContent='Partial NOAA coverage; unavailable fields shown as --.';
+ }));
+ if(request===compareSequence&&$('compareStatus').textContent.startsWith('Retrieving'))$('compareStatus').textContent='NOAA forecast sampled at both projected positions.';
+}
+function setComparison(enabled){
+ comparing=enabled;compareSequence++;
+ $('comparePanel').hidden=!enabled;$('compareResults').hidden=!enabled;$('singleWeather').style.display=enabled?'none':'';
+ $('compareBtn').classList.toggle('active',enabled);
+ if(enabled){$('compareValid').textContent=validAtFor(forecastHour);drawComparison();refreshComparison()}
+ else clearComparisonMap();
+}
+$('compareBtn').onclick=()=>setComparison(!comparing);
+$('closeCompare').onclick=()=>setComparison(false);
+$('applyCompare').onclick=refreshComparison;
 const speed=p=>Math.hypot(p.u,p.v)*1.943844;
 const palette=['#124d9e','#09b9f4','#13d0ba','#b5df37','#ffe052','#fa8639','#ec3670','#aa27bd'];
 const colorScales={
@@ -95,7 +163,7 @@ ctx.putImageData(pixels,0,0);gradient=L.imageOverlay(canvas.toDataURL('image/png
 if(arrowsOn&&mode==='wind'){arrows=L.layerGroup();const marks=[];for(const p of pts){const pixel=map.latLngToContainerPoint([p.lat,p.lon+worldShift]),size=map.getSize();if(pixel.x<0||pixel.y<0||pixel.x>size.x||pixel.y>size.y||marks.some(q=>Math.hypot(q.x-pixel.x,q.y-pixel.y)<70))continue;marks.push(pixel);const angle=Math.atan2(p.u,p.v)*180/Math.PI;const icon=L.divIcon({className:'',iconSize:[24,24],iconAnchor:[12,12],html:'<svg width="24" height="24" viewBox="0 0 24 24" style="transform:rotate('+angle+'deg);filter:drop-shadow(0 1px 2px #00131b)"><path d="M12 3 L12 20 M6 10 L12 3 L18 10" fill="none" stroke="#f3faff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'});L.marker([p.lat,p.lon+worldShift],{icon,interactive:false,keyboard:false}).addTo(arrows)}arrows.addTo(map)}
 sampleAtShip()}
 let lastWaveRequestPosition=null,lastWindRequestPosition=null;
-function updateShip(a,b,cog,sog){if(!Number.isFinite(a)||!Number.isFinite(b)||Math.abs(a)>90||Math.abs(b)>180)return;lat=a;lon=b;if(Number.isFinite(Number(cog))&&cog!==null&&cog!==''&&Number(cog)>=0&&Number(cog)<360)liveCog=Number(cog);if(Number.isFinite(Number(sog))&&sog!==null&&sog!==''&&Number(sog)>=0&&Number(sog)<=60)liveSog=Number(sog);ship?.setLatLng([a,b]);const angle=Number(cog);if(cog!==null&&cog!==undefined&&cog!==''&&Number.isFinite(angle)&&angle>=0&&angle<360){const svg=ship?.getElement()?.querySelector('svg');if(svg)svg.style.transform='rotate('+angle+'deg)'}$('positionText').textContent=nauticalCoord(a,true)+'  '+nauticalCoord(b,false);updateProjection();sampleAtShip();if(encounterMode==='encounter'&&forecastHour>0){const p=positionAtHour(forecastHour);if(p&&(!nearestToVessel(grid)||!nearestToVessel(waveGrid))){refresh(p.lat,p.lon,true);loadWave(p.lat,p.lon)}return}if(!nearestToVessel(grid)||grid?.forecastHour!==forecastHour){const d=lastWindRequestPosition;if(!d||Math.abs(a-d.lat)>2||longitudeDelta(b,d.lon)>2){lastWindRequestPosition={lat:a,lon:b};refresh(a,b,true)}}if(waveGrid?.forecastHour!==forecastHour||!nearestToVessel(waveGrid)){const d=lastWaveRequestPosition;if(!d||Math.abs(a-d.lat)>2||Math.abs(b-d.lon)>2){lastWaveRequestPosition={lat:a,lon:b};loadWave(a,b)}}}
+function updateShip(a,b,cog,sog){if(!Number.isFinite(a)||!Number.isFinite(b)||Math.abs(a)>90||Math.abs(b)>180)return;lat=a;lon=b;if(Number.isFinite(Number(cog))&&cog!==null&&cog!==''&&Number(cog)>=0&&Number(cog)<360)liveCog=Number(cog);if(Number.isFinite(Number(sog))&&sog!==null&&sog!==''&&Number(sog)>=0&&Number(sog)<=60)liveSog=Number(sog);ship?.setLatLng([a,b]);const angle=Number(cog);if(cog!==null&&cog!==undefined&&cog!==''&&Number.isFinite(angle)&&angle>=0&&angle<360){const svg=ship?.getElement()?.querySelector('svg');if(svg)svg.style.transform='rotate('+angle+'deg)'}$('positionText').textContent=nauticalCoord(a,true)+'  '+nauticalCoord(b,false);if(comparing)drawComparison();updateProjection();sampleAtShip();if(encounterMode==='encounter'&&forecastHour>0){const p=positionAtHour(forecastHour);if(p&&(!nearestToVessel(grid)||!nearestToVessel(waveGrid))){refresh(p.lat,p.lon,true);loadWave(p.lat,p.lon)}return}if(!nearestToVessel(grid)||grid?.forecastHour!==forecastHour){const d=lastWindRequestPosition;if(!d||Math.abs(a-d.lat)>2||longitudeDelta(b,d.lon)>2){lastWindRequestPosition={lat:a,lon:b};refresh(a,b,true)}}if(waveGrid?.forecastHour!==forecastHour||!nearestToVessel(waveGrid)){const d=lastWaveRequestPosition;if(!d||Math.abs(a-d.lat)>2||Math.abs(b-d.lon)>2){lastWaveRequestPosition={lat:a,lon:b};loadWave(a,b)}}}
 try{ws=new WebSocket('wss://ais.wardlab.dev');ws.onopen=()=>$('bridge').textContent='BRIDGE CONNECTED';ws.onclose=()=>$('bridge').textContent='BRIDGE OFFLINE';ws.onerror=()=>$('bridge').textContent='BRIDGE UNAVAILABLE';ws.onmessage=e=>{try{const v=JSON.parse(e.data);if(v.source==='AIVDO'||v.type==='ownship')updateShip(Number(v.lat??v.latitude),Number(v.lon??v.longitude),v.cog??v.courseOverGround??v.course_over_ground??v.course,v.sog??v.speedOverGround??v.speed_over_ground??v.speed)}catch{}}}catch{$('bridge').textContent='BRIDGE UNAVAILABLE'}
 function insideGrid(){if(grid?.forecastHour!==forecastHour||!grid?.points?.length)return false;const b=map.getBounds(),p=grid.points;const n=Math.max(...p.map(x=>x.lat)),s=Math.min(...p.map(x=>x.lat)),w=Math.min(...p.map(x=>x.lon)),e=Math.max(...p.map(x=>x.lon));const shifted=360*Math.round(((w+e)/2-b.getCenter().lng)/360);return b.getNorth()<n-2&&b.getSouth()>s+2&&b.getWest()+shifted>w+2&&b.getEast()+shifted<e-2}function refresh(targetLat=null,targetLon=null,force=false){if(!map||!windOn)return;if(!force&&encounterMode==='fixed'&&insideGrid()){render();$('status').textContent='NOAA GFS · using loaded forecast grid';return}clearTimeout(debounce);debounce=setTimeout(async()=>{const request=++sequence,c=force?{lat:targetLat,lng:targetLon}:(encounterMode==='encounter'?(()=>{const p=positionAtHour(forecastHour);return p?{lat:p.lat,lng:p.lon}:map.getCenter()})():map.getCenter());$('status').textContent='Refreshing NOAA GFS wind…';try{const data=await forecastData('wind',c,forecastHour);if(request!==sequence)return;const previous=grid;grid=data;updateMarineCards();sampleAtShip();try{render()}catch(e){grid=previous;render();throw e}$('validTime').textContent='Valid: '+data.validTime+' · Run '+data.modelRun+' · f'+String(data.modelForecastHour).padStart(3,'0')+' · sample '+(data.shipSample?data.shipSample.sampleLat.toFixed(2)+'°, '+data.shipSample.sampleLon.toFixed(2)+'°':'unavailable');$('status').textContent='NOAA GFS · interpolated wind + direction';$('info').textContent='NOAA GFS forecast valid '+data.validTime+'. White arrows show wind TO direction; meteorological FROM direction appears in the inspector. Interpolation is display smoothing, not higher model resolution.'}catch(error){if(request!==sequence)return;$('status').textContent='NOAA refresh unavailable · '+String(error.message).slice(0,80);$('info').textContent=grid?'Last successfully loaded NOAA grid retained. Refresh failed: '+error.message:'NOAA wind unavailable: '+error.message;if(!grid){$('wind').textContent='--';$('direction').textContent='Unavailable'}}},500)}
 async function loadWave(targetLat=positionAtHour(forecastHour)?.lat??lat,targetLon=positionAtHour(forecastHour)?.lon??lon){
@@ -123,6 +191,6 @@ for(const h of [0,6,12,18,24,36,48,72]){const b=document.createElement('button')
  if(forecastHour===h)return;forecastHour=h;sequence++;waveRequest++;grid=null;waveGrid=null;clearLayers();updateMarineCards();$('wind').textContent='--';$('direction').textContent='Loading NOAA forecast';
  $('timeStatus').textContent='Selected '+forecastLabel(h)+' · retrieving NOAA wind and waves';
  for(const btn of $('steps').children)btn.style.borderColor=btn===b?'#6de0f8':'#376077';
- reloadEncounter();
+ reloadEncounter();if(comparing)refreshComparison();
  };if(h===0)b.style.borderColor='#6de0f8';$('steps').appendChild(b)}
 $('timeStatus').textContent='Selected '+forecastLabel(0)+' · NOAA forecast valid time';updateLegend();updateProjection();refresh();setTimeout(loadWave,1500);
