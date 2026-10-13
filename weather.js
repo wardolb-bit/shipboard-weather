@@ -273,6 +273,7 @@ function showContextMenu(event){
  item('Fixed position',()=>{if(comparing)setComparison(false);$('encounterMode').value='fixed';$('encounterMode').dispatchEvent(new Event('change'))});
  item('Vessel encounter',()=>{if(comparing)setComparison(false);$('encounterMode').value='encounter';$('encounterMode').dispatchEvent(new Event('change'))});
  item((comparing?'✓ ':'')+'Compare courses',()=>$('compareBtn').click());
+ item('Voyage route planner',()=>window.routePlanner?.open());
  item('Course / speed settings',()=>{if(comparing)setComparison(false);$('encounterMode').value='encounter';$('encounterMode').dispatchEvent(new Event('change'));$('manualMotion').checked=true;$('manualMotion').dispatchEvent(new Event('change'))});
  separator();heading('MAP & DATA');
  item('Center on vessel',()=>$('center').click());
@@ -294,6 +295,6 @@ for(const h of [0,6,12,18,24,36,48,72]){const b=document.createElement('button')
  if(forecastHour===h)return;forecastHour=h;sequence++;waveRequest++;clearTimeout(debounce);const instant=restoreHourFrame();if(!instant){$('status').textContent='Loading NOAA forecast · retaining previous map until ready';$('wind').textContent='--';$('direction').textContent='Loading NOAA forecast'};
  $('timeStatus').textContent='Selected '+forecastLabel(h)+' · retrieving NOAA wind and waves';
  for(const btn of $('steps').children)btn.style.borderColor=btn===b?'#6de0f8':'#376077';
- if(!instant)reloadEncounter();else updateProjection();if(comparing)refreshComparison();
+ if(!instant)reloadEncounter();else updateProjection();if(comparing)refreshComparison();document.dispatchEvent(new CustomEvent('weather-hour-changed',{detail:{hour:h}}));
  };if(h===0)b.style.borderColor='#6de0f8';$('steps').appendChild(b)}
 $('timeStatus').textContent='Selected '+forecastLabel(0)+' · NOAA forecast valid time';updateLegend();updateProjection();refresh();setTimeout(loadWave,1500);
