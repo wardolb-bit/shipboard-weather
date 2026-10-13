@@ -302,7 +302,7 @@ function updateMarineCards(){
  $('waveValue').textContent=sea&&Number.isFinite(sea.height)?(sea.height*3.28084).toFixed(1)+' ft':'--';
  $('waveInfo').textContent=sea&&Number.isFinite(sea.height)?'Combined wind waves + swell':'Wave grid not available';
  $('swellValue').textContent=sea&&Number.isFinite(sea.swell)?(sea.swell*3.28084).toFixed(1)+' ft':'--';
- $('swellInfo').textContent=sea&&Number.isFinite(sea.period)?'Period '+sea.period.toFixed(0)+' s'+(Number.isFinite(sea.direction)?' · '+Math.round(sea.direction)+'°':''):'Primary swell component pending';
+ $('swellInfo').textContent=sea&&Number.isFinite(sea.period)?'Swell '+(Number.isFinite(sea.swellPeriod)?sea.swellPeriod.toFixed(0):sea.period.toFixed(0))+' s'+(Number.isFinite(sea.swellDirection)?' · FROM '+Math.round(sea.swellDirection)+'°':' · direction unavailable'):'Primary swell component pending';
  window.vesselAdvisories?.update();
 }
 function sampleAtShip(){updateMarineCards();if(!grid)return;const pos=positionAtHour(forecastHour);if(!pos)return;const sampleLat=pos.lat,sampleLon=pos.lon;let nearest=null,d=Infinity;for(const p of grid.points){const delta=Math.abs(p.lat-sampleLat)+longitudeDelta(p.lon,sampleLon)*Math.cos(sampleLat*Math.PI/180);if(delta<d){d=delta;nearest=p}}const exact=grid.shipSample;const selected=exact&&Math.abs(exact.lat-sampleLat)<0.15&&longitudeDelta(exact.lon,sampleLon)<0.15?exact:nearest;if(selected&&(selected===exact||d<3)){$('wind').textContent=speed(selected).toFixed(0)+' kt';$('direction').textContent=Math.round((Math.atan2(-selected.u,-selected.v)*180/Math.PI+360)%360)+'° FROM · NOAA GFS'}else{$('wind').textContent='--';$('direction').textContent='Vessel outside forecast grid'}}
