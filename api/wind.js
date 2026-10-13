@@ -27,7 +27,7 @@ module.exports=async function(req,res){
   const central=(lon+360)%360,west=Math.floor(central-11),east=Math.ceil(central+11);
   const north=Math.min(89,Math.ceil(lat+11)),south=Math.max(-89,Math.floor(lat-11));
   const file='gfs.t'+cycle+'z.pgrb2.0p25.f'+String(modelForecastHour).padStart(3,'0');
-  const base={file,var_UGRD:'on',var_VGRD:'on',var_GUST:'on',lev_surface:'on',lev_10_m_above_ground:'on',subregion:'',toplat:String(north),bottomlat:String(south),dir:'/gfs.'+date+'/'+cycle+'/atmos'};
+  const base={file,var_UGRD:'on',var_VGRD:'on',var_GUST:'on',var_PRMSL:'on',lev_mean_sea_level:'on',lev_surface:'on',lev_10_m_above_ground:'on',subregion:'',toplat:String(north),bottomlat:String(south),dir:'/gfs.'+date+'/'+cycle+'/atmos'};
   const filter='https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl?';
   // NOAA's 0..360° seam: request each side separately and sample from its own GRIB geometry.
   const regions=west<0?[[west+360,359.99],[0,east]]:east>360?[[west,359.99],[0,east-360]]:[[west,east]];
@@ -46,9 +46,9 @@ module.exports=async function(req,res){
    const decoded=[];
    for(const message of splitMessages(segment.bytes))for(const field of parseFields(message)){
     const product=parseProduct(field.section4);
-    if(product.parameterCategory!==2||![2,3,22].includes(product.parameterNumber))continue;
+    if(!((product.parameterCategory===2&&[2,3,22].includes(product.parameterNumber))||(product.parameterCategory===3&&product.parameterNumber===1)))continue;
     const geometry=parseGrid(field.section3),{values}=decodeFieldValues(field);
-    decoded.push({component:product.parameterNumber===2?'u':product.parameterNumber===3?'v':'gust',values,geometry});
+    decoded.push({component:product.parameterCategory===3?'mslp':product.parameterNumber===2?'u':product.parameterNumber===3?'v':'gust',values,geometry});
    }
    const u=decoded.find(x=>x.component==='u'),v=decoded.find(x=>x.component==='v'),gust=decoded.find(x=>x.component==='gust');
    if(!u||!v)throw Error('GRIB2 missing paired 10m wind fields');
@@ -56,10 +56,10 @@ module.exports=async function(req,res){
   });
   const points=[];
   const at=(y,x)=>{const nx=sourceLongitude(x),segment=segmentFields.find(r=>inRegion(nx,r));if(!segment)return null;
-   const {u,v,gust}=segment,ui=nearestGridpoint(u.geometry,y,nx),vi=nearestGridpoint(v.geometry,y,nx);
+   const {u,v,gust,mslp}=segment,ui=nearestGridpoint(u.geometry,y,nx),vi=nearestGridpoint(v.geometry,y,nx);
    const eastward=Number(u.values[ui.index]),northward=Number(v.values[vi.index]);
    if(!Number.isFinite(eastward)||!Number.isFinite(northward)||Math.abs(eastward)>=160||Math.abs(northward)>=160)return null;
-   return {lat:y,lon:x-360*Math.round((x-lon)/360),u:eastward,v:northward,...(gust?{gust:Number(gust.values[nearestGridpoint(gust.geometry,y,nx).index])}:{})};
+   return {lat:y,lon:x-360*Math.round((x-lon)/360),u:eastward,v:northward,...(gust?{gust:Number(gust.values[nearestGridpoint(gust.geometry,y,nx).index])}:{}),...(mslp?{mslp:Number(mslp.values[nearestGridpoint(mslp.geometry,y,nx).index])/100}:{})};
   };
   for(let y=south;y<=north;y++)for(let x=west;x<=east;x++){const p=at(y,x);if(p)points.push(p)}
   if(points.length<50)throw Error('Incomplete NOAA model subset');
