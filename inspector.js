@@ -27,7 +27,8 @@
    metric('GUST',w&&Number.isFinite(w.gust)?val(w.gust*1.943844)+' kt':'--','10m GFS')+
    metric('COMBINED SEAS',v&&Number.isFinite(v.height)?val(v.height*3.28084,1)+' ft':'--',v&&Number.isFinite(v.period)?val(v.period)+' s period':'--')+
    metric('PRIMARY SWELL',v&&Number.isFinite(v.swell)?val(v.swell*3.28084,1)+' ft':'--',v?(dir(v.swellDirection)+' · '+(Number.isFinite(v.swellPeriod)?val(v.swellPeriod)+' s':'--')):'--')+
-   metric('PRESSURE',w&&Number.isFinite(w.mslp)?val(w.mslp)+' hPa':'--','Mean sea level');
+   metric('PRESSURE',w&&Number.isFinite(w.mslp)?val(w.mslp)+' hPa':'--','Mean sea level')+
+   (()=>{const c=window.currentGuidance?.nearest(point);return metric('OCEAN CURRENT',c?val(c.speed,1)+' kt':'--',c?Math.round(c.direction)+'° TO · model guidance':'Activate currents layer')})();
   card.querySelector('#wiValid').textContent='NOAA GFS · +'+forecastHour+'h · '+validAtFor(forecastHour).slice(0,16).replace('T',' ')+' UTC · nearest 1° model sample';
  }
  map.on('mousemove',e=>show(e.latlng));
