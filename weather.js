@@ -445,10 +445,19 @@ function closeContextMenu(){$('contextMenu').hidden=true}
 function showContextMenu(event){
  event.preventDefault();
  const menu=$('contextMenu');menu.replaceChildren();
- const heading=text=>{const label=document.createElement('div');label.className='menu-heading';label.textContent=text;menu.appendChild(label)};
- const separator=()=>{const line=document.createElement('div');line.className='menu-separator';menu.appendChild(line)};
- const item=(name,action)=>{const button=document.createElement('button');button.type='button';button.textContent=name;button.onclick=()=>{closeContextMenu();action()};menu.appendChild(button)};
- heading('WEATHER LAYERS');
+ const area=document.querySelector('.maparea'),bounds=area.getBoundingClientRect();
+ const point=map.containerPointToLatLng([event.clientX-map.getContainer().getBoundingClientRect().left,event.clientY-map.getContainer().getBoundingClientRect().top]);
+ const top=document.createElement('div');top.className='menu-coords';
+ const title=document.createElement('small');title.textContent='CHART POSITION';
+ const coords=document.createElement('strong');coords.textContent=nauticalCoord(point.lat,true)+'  '+nauticalCoord(normalizeLon(point.lng),false);
+ top.append(title,coords);menu.appendChild(top);
+ let target=menu;
+ const item=(name,action)=>{const button=document.createElement('button');button.type='button';button.textContent=name;button.onclick=()=>{closeContextMenu();action()};target.appendChild(button)};
+ const section=name=>{const details=document.createElement('details');details.className='menu-group';const summary=document.createElement('summary');summary.textContent=name;const body=document.createElement('div');body.className='menu-group-body';details.append(summary,body);menu.appendChild(details);target=body;};
+ const quick=document.createElement('div');quick.className='menu-quick';menu.appendChild(quick);target=quick;
+ item('Center on vessel',()=>$('center').click());
+ item('Voyage route planner',()=>window.routePlanner?.open());
+ section('WEATHER & CHART LAYERS');
  item('Marine forecast preset',()=>window.synoptic?.preset('marine'));
  item('Synoptic analysis preset',()=>window.synoptic?.preset('synoptic'));
  item('Clean chart preset',()=>window.synoptic?.preset('clean'));
@@ -463,22 +472,24 @@ function showContextMenu(event){
  item((mode==='wave'?'✓ ':'')+'Waves',()=>{windOn=true;selectMode('wave')});
  item('Wind direction: '+(arrowsOn?'ON':'OFF'),()=>$('directionBtn').click());
  item('Weather overlay: '+(windOn?'ON':'OFF'),()=>$('windBtn').click());
- separator();heading('FORECAST TOOLS');
+ section('FORECAST & VOYAGE');
  item('Fixed position',()=>{if(comparing)setComparison(false);$('encounterMode').value='fixed';$('encounterMode').dispatchEvent(new Event('change'))});
  item('Vessel encounter',()=>{if(comparing)setComparison(false);$('encounterMode').value='encounter';$('encounterMode').dispatchEvent(new Event('change'))});
  item((comparing?'✓ ':'')+'Compare courses',()=>$('compareBtn').click());
- item('Voyage route planner',()=>window.routePlanner?.open());
  item('Vessel weather advisories',()=>window.vesselAdvisories?.open());
  item('Course / speed settings',()=>{if(comparing)setComparison(false);$('encounterMode').value='encounter';$('encounterMode').dispatchEvent(new Event('change'));$('manualMotion').checked=true;$('manualMotion').dispatchEvent(new Event('change'))});
- separator();heading('MAP & DATA');
- item('Center on vessel',()=>$('center').click());
+ section('MAP & DATA');
  item('Refresh forecast',()=>{const p=positionAtHour(forecastHour);if(p){refresh(p.lat,p.lon,true);loadWave(p.lat,p.lon)}});
  item('Download NOAA GRIB',()=>openPanel('grib'));
  menu.hidden=false;
- const area=document.querySelector('.maparea').getBoundingClientRect();
- const x=Math.max(5,Math.min(event.clientX-area.left,area.width-menu.offsetWidth-5));
- const y=Math.max(5,Math.min(event.clientY-area.top,area.height-menu.offsetHeight-5));
+ const x=Math.max(5,Math.min(event.clientX-bounds.left,bounds.width-menu.offsetWidth-5));
+ const y=Math.max(5,Math.min(event.clientY-bounds.top,bounds.height-menu.offsetHeight-5));
  menu.style.left=x+'px';menu.style.top=y+'px';
+ menu.querySelectorAll('details').forEach(details=>details.addEventListener('toggle',()=>{
+  if(!details.open)return;
+  menu.querySelectorAll('details').forEach(other=>{if(other!==details)other.open=false});
+  menu.style.top=Math.max(5,Math.min(parseFloat(menu.style.top)||5,bounds.height-menu.offsetHeight-5))+'px';
+ }));
 }
 $('map').addEventListener('contextmenu',showContextMenu);
 document.querySelector('.maparea').addEventListener('contextmenu',event=>{if(event.target.closest('#contextMenu, #chartControls, #comparePanel, #drawer'))return;showContextMenu(event)});
