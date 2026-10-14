@@ -32,7 +32,7 @@
   card.querySelector('#wiValid').textContent='NOAA GFS · +'+forecastHour+'h · '+validAtFor(forecastHour).slice(0,16).replace('T',' ')+' UTC · nearest 1° model sample';
  }
  map.on('mousemove',e=>show(e.latlng));
- map.on('mouseout',()=>{card.hidden=true});
- document.addEventListener('weather-hour-changed',()=>{if(last&&!card.hidden)show(last)});
+ map.on('click',e=>show(e.latlng)); // Touchscreen tap updates the sample; movement never locks.
+ document.addEventListener('weather-hour-changed',()=>{if(last)show(last)});
  document.addEventListener('weather-grid-updated',()=>{if(last&&!card.hidden)show(last)});
 })();
